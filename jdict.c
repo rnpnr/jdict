@@ -179,9 +179,9 @@ find_ent(const char *term, DictEnt *ents, size_t nents)
 		return find_ent(term, ents, nents/2);
 
 	if (nents % 2)
-		return find_ent(term, &ents[nents/2 + 1], nents/2 - 1);
-	else
 		return find_ent(term, &ents[nents/2 + 1], nents/2);
+	else
+		return find_ent(term, &ents[nents/2 + 1], nents/2 - 1);
 }
 
 static char *
