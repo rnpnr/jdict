@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #include "arg.h"
@@ -74,8 +73,8 @@ make_ent(YomiTok *tok, char *data)
 static DictEnt *
 parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t stride)
 {
-	int r, fd;
-	size_t i, ntoks, flen;
+	int r, ntoks, fd;
+	size_t i, flen;
 	char *data;
 	YomiTok *toks = NULL;
 	YomiParser p;
@@ -98,6 +97,8 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t stride)
 		switch (r) {
 		case YOMI_ERROR_NOMEM:
 			/* allocate more mem and try again */
+			if (ntoks + YOMI_TOK_DELTA < 0)
+				die("too many toks: %s\n", tbank);
 			ntoks += YOMI_TOK_DELTA;
 			toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
 			break;

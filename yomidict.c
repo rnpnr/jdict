@@ -6,7 +6,6 @@
  */
 #include <ctype.h>
 #include <stddef.h>
-#include <sys/types.h>
 
 #include "yomidict.h"
 
@@ -119,13 +118,12 @@ yomi_parse_num(YomiParser *p, YomiTok *t, const char *s, size_t slen)
 	return YOMI_ERROR_MALFO;
 }
 
-ssize_t
+int
 yomi_parse(YomiParser *p, YomiTok *toks, size_t ntoks,
     const char *bank, size_t blen)
 {
 	YomiTok *tok, *t;
-	size_t count = p->toknext;
-	int r;
+	int r, count = p->toknext;
 
 	if (toks == NULL)
 		return -1;
