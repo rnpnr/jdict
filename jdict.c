@@ -44,20 +44,22 @@ usage(void)
 
 /* takes a token of type YOMI_ENTRY and creates a DictEnt */
 static DictEnt *
-make_ent(YomiTok *tok, char *data)
+make_ent(YomiTok *toks, size_t ntoks, char *data)
 {
 	size_t i;
 	DictEnt *d;
 	YomiTok *tstr, *tdefs;
 
-	if (tok->type != YOMI_ENTRY)
+	if (toks[0].type != YOMI_ENTRY)
 		return NULL;
 
 	/* FIXME: hacky but works */
-	/* term = YOMI_ENT tok + 1 */
-	tstr = tok + 1;
-	/* definition array = YOMI_ENT tok + 6 */
-	tdefs = tok + 6;
+	/* definition array = YOMI_ENTRY tok + 6 */
+	if (ntoks - 6 < 0)
+		return NULL;
+	tdefs = toks + 6;
+	/* term = YOMI_ENTRY tok + 1 */
+	tstr = toks + 1;
 
 	d = xreallocarray(NULL, 1, sizeof(DictEnt));
 	d->term = strndup(data + tstr->start, tstr->end - tstr->start);
@@ -113,7 +115,7 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t stride)
 	ents = xreallocarray(ents, (*nents) + r/YOMI_TOKS_PER_ENT, sizeof(DictEnt));
 	for (i = 0; i < r; i++) {
 		if (toks[i].type == YOMI_ENTRY) {
-			e = make_ent(&toks[i], data);
+			e = make_ent(&toks[i], r - i, data);
 			if (e == NULL)
 				return NULL;
 			memcpy(&ents[(*nents)++], e, sizeof(DictEnt));
