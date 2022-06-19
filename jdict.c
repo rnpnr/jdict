@@ -26,13 +26,9 @@ typedef struct {
 char *argv0;
 
 static void
-cleanup(char **dicts, char **terms)
+cleanup(char **terms)
 {
-	if (dicts != default_dicts)
-		free(dicts);
 	free(terms);
-
-	dicts = NULL;
 	terms = NULL;
 }
 
@@ -209,7 +205,7 @@ print_ent(DictEnt *ent)
 }
 
 static int
-find_and_print_defs(char **terms, size_t nterms, char **dicts, size_t ndicts)
+find_and_print_defs(char **terms, size_t nterms, struct Dict *dicts, size_t ndicts)
 {
 	char path[PATH_MAX - 18];
 	size_t i, j, k;
@@ -217,14 +213,14 @@ find_and_print_defs(char **terms, size_t nterms, char **dicts, size_t ndicts)
 	DictEnt *ent, *ents;
 
 	for (i = 0; i < ndicts; i++) {
-		snprintf(path, LEN(path), "%s/%s", prefix, dicts[i]);
+		snprintf(path, LEN(path), "%s/%s", prefix, dicts[i].rom);
 		nents = 0;
-		ents = make_dict(path, DICT_STRIDE, &nents);
+		ents = make_dict(path, dicts[i].stride, &nents);
 		if (ents == NULL)
 			return -1;
 		qsort(ents, nents, sizeof(DictEnt), entcmp);
 
-		printf("%s\n", dicts[i]);
+		printf("%s\n", dicts[i].name);
 		for (j = 0; j < nterms; j++) {
 			ent = find_ent(terms[j], ents, nents);
 			if (ent == NULL) {
@@ -248,7 +244,8 @@ find_and_print_defs(char **terms, size_t nterms, char **dicts, size_t ndicts)
 int
 main(int argc, char *argv[])
 {
-	char **dicts = NULL, **terms = NULL;
+	char **terms = NULL, *t;
+	struct Dict *dicts = NULL;
 	size_t ndicts = 0, nterms = 0;
 	int i;
 
@@ -256,16 +253,24 @@ main(int argc, char *argv[])
 
 	ARGBEGIN {
 	case 'd':
-		dicts = xreallocarray(dicts, ++ndicts, sizeof(char *));
-		dicts[0] = EARGF(usage());
+		t = EARGF(usage());
+		for (i = 0; i < LEN(default_dict_map); i++) {
+			if (strcmp(t, default_dict_map[i].rom) == 0) {
+				dicts = &default_dict_map[i];
+				ndicts++;
+				break;
+			}
+		}
+		if (dicts == NULL)
+			die("invalid dictionary name: %s\n", t);
 		break;
 	default:
 		usage();
 	} ARGEND
 
 	if (ndicts == 0) {
-		dicts = default_dicts;
-		ndicts = LEN(default_dicts);
+		dicts = default_dict_map;
+		ndicts = LEN(default_dict_map);
 	}
 
 	/* remaining argv elements are terms to search for */
@@ -275,13 +280,13 @@ main(int argc, char *argv[])
 	}
 
 	if (nterms == 0) {
-		cleanup(dicts, terms);
+		cleanup(terms);
 		usage();
 	}
 
 	find_and_print_defs(terms, nterms, dicts, ndicts);
 
-	cleanup(dicts, terms);
+	cleanup(terms);
 
 	return 0;
 }
