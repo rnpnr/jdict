@@ -16,6 +16,7 @@
 #include "config.h"
 
 #define YOMI_TOKS_PER_ENT 10
+#define YOMI_TOK_DELTA (YOMI_TOKS_PER_ENT * 100)
 
 typedef struct {
 	char *term;
@@ -71,11 +72,12 @@ make_ent(YomiTok *tok, char *data)
 }
 
 static DictEnt *
-parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, YomiTok *toks, size_t ntoks)
+parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t stride)
 {
 	int r, fd;
-	size_t flen, i;
+	size_t i, ntoks, flen;
 	char *data;
+	YomiTok *toks = NULL;
 	YomiParser p;
 	DictEnt *e;
 
@@ -85,10 +87,27 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, YomiTok *toks, 
 	data = mmap(NULL, flen, PROT_READ, MAP_PRIVATE, fd, 0);
 	close(fd);
 
+	/* allocate tokens */
+	ntoks = stride * YOMI_TOKS_PER_ENT + 1;
+	if ((ntoks - 1) / YOMI_TOKS_PER_ENT != stride)
+		die("stride multiplication overflowed: %s\n", tbank);
+	toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
+
 	yomi_init(&p);
-	r = yomi_parse(&p, toks, ntoks, data, flen);
-	if (r < 0)
-		return NULL;
+	while ((r = yomi_parse(&p, toks, ntoks, data, flen)) < 0) {
+		switch (r) {
+		case YOMI_ERROR_NOMEM:
+			/* allocate more mem and try again */
+			ntoks += YOMI_TOK_DELTA;
+			toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
+			break;
+		case YOMI_ERROR_INVAL: /* FALLTRHOUGH */
+		case YOMI_ERROR_MALFO:
+			munmap(data, flen);
+			free(toks);
+			return NULL;
+		}
+	}
 
 	ents = xreallocarray(ents, (*nents) + r/YOMI_TOKS_PER_ENT, sizeof(DictEnt));
 	for (i = 0; i < r; i++) {
@@ -99,8 +118,8 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, YomiTok *toks, 
 			memcpy(&ents[(*nents)++], e, sizeof(DictEnt));
 		}
 	}
-
 	munmap(data, flen);
+	free(toks);
 
 	return ents;
 }
@@ -109,17 +128,10 @@ static DictEnt *
 make_dict(const char *path, size_t stride, size_t *nents)
 {
 	char tbank[PATH_MAX];
-	size_t i, ntoks, nbanks = 0;
+	size_t i, nbanks = 0;
 	DIR *dir;
 	struct dirent *dent;
-	YomiTok *toks = NULL;
 	DictEnt *dict = NULL;
-
-	ntoks = stride * YOMI_TOKS_PER_ENT + 1;
-	if ((ntoks - 1) / YOMI_TOKS_PER_ENT != stride)
-		die("stride multiplication overflowed: %s\n", path);
-
-	toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
 
 	if (!(dir = opendir(path)))
 		die("opendir(): failed to open: %s\n", path);
@@ -135,11 +147,10 @@ make_dict(const char *path, size_t stride, size_t *nents)
 
 	for (i = 1; i <= nbanks; i++) {
 		snprintf(tbank, sizeof(tbank), "%s/term_bank_%d.json", path, (int)i);
-		dict = parse_term_bank(dict, nents, tbank, toks, ntoks);
+		dict = parse_term_bank(dict, nents, tbank, stride);
 		if (dict == NULL)
 			return NULL;
 	}
-	free(toks);
 
 	return dict;
 }
@@ -214,7 +225,7 @@ find_and_print_defs(char **terms, size_t nterms, char **dicts, size_t ndicts)
 		for (j = 0; j < nterms; j++) {
 			ent = find_ent(terms[j], ents, nents);
 			if (ent == NULL) {
-				printf("term not found:%s\n", terms[j]);
+				printf("term not found: %s\n", terms[j]);
 				return -1;
 			}
 			print_ent(ent);
