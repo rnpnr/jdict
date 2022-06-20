@@ -78,11 +78,14 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t stride)
 	YomiParser p;
 	DictEnt *e;
 
-	/* FIXME: these need to be checked for errors */
-	fd = open(tbank, O_RDONLY);
+	if ((fd = open(tbank, O_RDONLY)) < 0)
+		die("can't open file: %s\n", tbank);
 	flen = lseek(fd, 0, SEEK_END);
 	data = mmap(NULL, flen, PROT_READ, MAP_PRIVATE, fd, 0);
 	close(fd);
+
+	if (data == MAP_FAILED)
+		die("couldn't mmap file: %s\n", tbank);
 
 	/* allocate tokens */
 	ntoks = stride * YOMI_TOKS_PER_ENT + 1;
@@ -100,7 +103,7 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t stride)
 			ntoks += YOMI_TOK_DELTA;
 			toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
 			break;
-		case YOMI_ERROR_INVAL: /* FALLTRHOUGH */
+		case YOMI_ERROR_INVAL: /* FALLTHROUGH */
 		case YOMI_ERROR_MALFO:
 			munmap(data, flen);
 			free(toks);
