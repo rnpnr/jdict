@@ -176,13 +176,13 @@ find_ent(const char *term, DictEnt *ents, size_t nents)
 	r = strcmp(term, ents[nents/2].term);
 	if (r == 0)
 		return &ents[nents/2];
-	else if (r < 0)
+	if (r < 0)
 		return find_ent(term, ents, nents/2);
 
 	if (nents % 2)
 		return find_ent(term, &ents[nents/2 + 1], nents/2);
-	else
-		return find_ent(term, &ents[nents/2 + 1], nents/2 - 1);
+
+	return find_ent(term, &ents[nents/2 + 1], nents/2 - 1);
 }
 
 static char *
