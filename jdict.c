@@ -205,39 +205,36 @@ print_ent(DictEnt *ent)
 }
 
 static int
-find_and_print_defs(char **terms, size_t nterms, struct Dict *dicts, size_t ndicts)
+find_and_print_defs(struct Dict *dict, char **terms, size_t nterms)
 {
 	char path[PATH_MAX - 18];
-	size_t i, j, k;
-	size_t nents;
+	size_t i, j;
+	size_t nents = 0;
 	DictEnt *ent, *ents;
 
-	for (i = 0; i < ndicts; i++) {
-		snprintf(path, LEN(path), "%s/%s", prefix, dicts[i].rom);
-		nents = 0;
-		ents = make_dict(path, dicts[i].stride, &nents);
-		if (ents == NULL)
-			return -1;
-		qsort(ents, nents, sizeof(DictEnt), entcmp);
+	snprintf(path, LEN(path), "%s/%s", prefix, dict->rom);
+	ents = make_dict(path, dict->stride, &nents);
+	if (ents == NULL)
+		return -1;
+	qsort(ents, nents, sizeof(DictEnt), entcmp);
+		printf("%s\n", dict->name);
 
-		printf("%s\n", dicts[i].name);
-		for (j = 0; j < nterms; j++) {
-			ent = find_ent(terms[j], ents, nents);
-			if (ent == NULL) {
-				printf("term not found: %s\n\n", terms[j]);
-				continue;
-			}
-			print_ent(ent);
+	for (i = 0; i < nterms; i++) {
+		ent = find_ent(terms[i], ents, nents);
+		if (ent == NULL) {
+			printf("term not found: %s\n\n", terms[i]);
+			continue;
 		}
-
-		for (j = 0; j < nents; j++) {
-			for (k = 0; k < ents[j].ndefs; k++)
-				free(ents[j].defs[k]);
-			free(ents[j].defs);
-			free(ents[j].term);
-		}
-		free(ents);
+		print_ent(ent);
 	}
+	for (i = 0; i < nents; i++) {
+		for (j = 0; j < ents[i].ndefs; j++)
+			free(ents[i].defs[j]);
+		free(ents[i].defs);
+		free(ents[i].term);
+	}
+	free(ents);
+
 	return 0;
 }
 
@@ -284,7 +281,8 @@ main(int argc, char *argv[])
 		usage();
 	}
 
-	find_and_print_defs(terms, nterms, dicts, ndicts);
+	for (i = 0; i < ndicts; i++)
+		find_and_print_defs(&dicts[i], terms, nterms);
 
 	cleanup(terms);
 
