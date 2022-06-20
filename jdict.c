@@ -224,8 +224,8 @@ find_and_print_defs(char **terms, size_t nterms, struct Dict *dicts, size_t ndic
 		for (j = 0; j < nterms; j++) {
 			ent = find_ent(terms[j], ents, nents);
 			if (ent == NULL) {
-				printf("term not found: %s\n", terms[j]);
-				return -1;
+				printf("term not found: %s\n\n", terms[j]);
+				continue;
 			}
 			print_ent(ent);
 		}
