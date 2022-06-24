@@ -69,7 +69,7 @@ make_ent(YomiTok *toks, size_t ntoks, char *data)
 }
 
 static DictEnt *
-parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t stride)
+parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
 {
 	int r, ntoks, fd;
 	size_t i, flen;
@@ -88,8 +88,8 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t stride)
 		die("couldn't mmap file: %s\n", tbank);
 
 	/* allocate tokens */
-	ntoks = stride * YOMI_TOKS_PER_ENT + 1;
-	if ((ntoks - 1) / YOMI_TOKS_PER_ENT != stride)
+	ntoks = *stride * YOMI_TOKS_PER_ENT + 1;
+	if ((ntoks - 1) / YOMI_TOKS_PER_ENT != *stride)
 		die("stride multiplication overflowed: %s\n", tbank);
 	toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
 
@@ -102,6 +102,7 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t stride)
 				die("too many toks: %s\n", tbank);
 			ntoks += YOMI_TOK_DELTA;
 			toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
+			*stride = ntoks/YOMI_TOKS_PER_ENT;
 			break;
 		case YOMI_ERROR_INVAL: /* FALLTHROUGH */
 		case YOMI_ERROR_MALFO:
@@ -127,7 +128,7 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t stride)
 }
 
 static DictEnt *
-make_dict(const char *path, size_t stride, size_t *nents)
+make_dict(const char *path, size_t *stride, size_t *nents)
 {
 	char tbank[PATH_MAX];
 	size_t i, nbanks = 0;
@@ -216,7 +217,7 @@ find_and_print_defs(struct Dict *dict, char **terms, size_t nterms)
 	DictEnt *ent, *ents;
 
 	snprintf(path, LEN(path), "%s/%s", prefix, dict->rom);
-	ents = make_dict(path, dict->stride, &nents);
+	ents = make_dict(path, &dict->stride, &nents);
 	if (ents == NULL)
 		return -1;
 	qsort(ents, nents, sizeof(DictEnt), entcmp);
