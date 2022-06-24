@@ -106,9 +106,9 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
 			break;
 		case YOMI_ERROR_INVAL: /* FALLTHROUGH */
 		case YOMI_ERROR_MALFO:
-			munmap(data, flen);
-			free(toks);
-			return NULL;
+			free(ents);
+			ents = NULL;
+			goto cleanup;
 		}
 	}
 
@@ -116,11 +116,16 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
 	for (i = 0; i < r; i++) {
 		if (toks[i].type == YOMI_ENTRY) {
 			e = make_ent(&toks[i], r - i, data);
-			if (e == NULL)
-				return NULL;
+			if (e == NULL) {
+				free(ents);
+				ents = NULL;
+				goto cleanup;
+			}
 			memcpy(&ents[(*nents)++], e, sizeof(DictEnt));
 		}
 	}
+
+cleanup:
 	munmap(data, flen);
 	free(toks);
 
