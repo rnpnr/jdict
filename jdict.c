@@ -26,13 +26,6 @@ typedef struct {
 char *argv0;
 
 static void
-cleanup(char **terms)
-{
-	free(terms);
-	terms = NULL;
-}
-
-static void
 usage(void)
 {
 	die("usage: %s [-d path] term ...\n", argv0);
@@ -114,14 +107,16 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
 
 	ents = xreallocarray(ents, (*nents) + r/YOMI_TOKS_PER_ENT, sizeof(DictEnt));
 	for (i = 0; i < r; i++) {
-		if (toks[i].type == YOMI_ENTRY) {
-			e = make_ent(&toks[i], r - i, data);
-			if (e == NULL) {
-				free(ents);
-				ents = NULL;
-				goto cleanup;
-			}
+		if (toks[i].type != YOMI_ENTRY)
+			continue;
+
+		e = make_ent(&toks[i], r - i, data);
+		if (e != NULL) {
 			memcpy(&ents[(*nents)++], e, sizeof(DictEnt));
+		} else {
+			free(ents);
+			ents = NULL;
+			break;
 		}
 	}
 
@@ -226,15 +221,14 @@ find_and_print_defs(struct Dict *dict, char **terms, size_t nterms)
 	if (ents == NULL)
 		return -1;
 	qsort(ents, nents, sizeof(DictEnt), entcmp);
-		printf("%s\n", dict->name);
 
+	printf("%s\n", dict->name);
 	for (i = 0; i < nterms; i++) {
 		ent = find_ent(terms[i], ents, nents);
-		if (ent == NULL) {
+		if (ent != NULL)
+			print_ent(ent);
+		else
 			printf("term not found: %s\n\n", terms[i]);
-			continue;
-		}
-		print_ent(ent);
 	}
 	for (i = 0; i < nents; i++) {
 		for (j = 0; j < ents[i].ndefs; j++)
@@ -286,14 +280,14 @@ main(int argc, char *argv[])
 	}
 
 	if (nterms == 0) {
-		cleanup(terms);
+		free(terms);
 		usage();
 	}
 
 	for (i = 0; i < ndicts; i++)
 		find_and_print_defs(&dicts[i], terms, nterms);
 
-	cleanup(terms);
+	free(terms);
 
 	return 0;
 }
