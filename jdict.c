@@ -17,6 +17,9 @@
 #define YOMI_TOKS_PER_ENT 10
 #define YOMI_TOK_DELTA (YOMI_TOKS_PER_ENT * 100)
 
+/* buffer length for interactive mode */
+#define BUFLEN 256
+
 typedef struct {
 	char *term;
 	char **defs;
@@ -28,7 +31,22 @@ char *argv0;
 static void
 usage(void)
 {
-	die("usage: %s [-d path] term ...\n", argv0);
+	die("usage: %s [-d path] [-i] term ...\n", argv0);
+}
+
+static void
+free_ents(DictEnt *ents, size_t nents)
+{
+	size_t i, j;
+
+	for (i = 0; i < nents; i++) {
+		for (j = 0; j < ents[i].ndefs; j++)
+			free(ents[i].defs[j]);
+		free(ents[i].defs);
+		free(ents[i].term);
+	}
+	free(ents);
+	ents = NULL;
 }
 
 /* takes a token of type YOMI_ENTRY and creates a DictEnt */
@@ -128,14 +146,15 @@ cleanup:
 }
 
 static DictEnt *
-make_dict(const char *path, size_t *stride, size_t *nents)
+make_dict(struct Dict *dict, size_t *nents)
 {
-	char tbank[PATH_MAX];
+	char path[PATH_MAX - 20], tbank[PATH_MAX];
 	size_t i, nbanks = 0;
 	DIR *dir;
 	struct dirent *dent;
-	DictEnt *dict = NULL;
+	DictEnt *ents = NULL;
 
+	snprintf(path, LEN(path), "%s/%s", prefix, dict->rom);
 	if (!(dir = opendir(path)))
 		die("opendir(): failed to open: %s\n", path);
 
@@ -149,13 +168,13 @@ make_dict(const char *path, size_t *stride, size_t *nents)
 	closedir(dir);
 
 	for (i = 1; i <= nbanks; i++) {
-		snprintf(tbank, sizeof(tbank), "%s/term_bank_%d.json", path, (int)i);
-		dict = parse_term_bank(dict, nents, tbank, stride);
-		if (dict == NULL)
+		snprintf(tbank, LEN(tbank), "%s/term_bank_%d.json", path, (int)i);
+		ents = parse_term_bank(ents, nents, tbank, &dict->stride);
+		if (ents == NULL)
 			return NULL;
 	}
 
-	return dict;
+	return ents;
 }
 
 static int
@@ -208,35 +227,72 @@ print_ent(DictEnt *ent)
 		printf("%s\n", fix_newlines(ent->defs[i]));
 }
 
+static void
+find_and_print(const char *term, DictEnt *ents, size_t nents)
+{
+	DictEnt *ent;
+
+	ent = find_ent(term, ents, nents);
+	if (ent)
+		print_ent(ent);
+	else
+		printf("term not found: %s\n\n", term);
+}
+
 static int
 find_and_print_defs(struct Dict *dict, char **terms, size_t nterms)
 {
-	char path[PATH_MAX - 18];
-	size_t i, j;
-	size_t nents = 0;
-	DictEnt *ent, *ents;
+	size_t i, nents = 0;
+	DictEnt *ents;
 
-	snprintf(path, LEN(path), "%s/%s", prefix, dict->rom);
-	ents = make_dict(path, &dict->stride, &nents);
+	ents = make_dict(dict, &nents);
 	if (ents == NULL)
 		return -1;
 	qsort(ents, nents, sizeof(DictEnt), entcmp);
 
 	printf("%s\n", dict->name);
-	for (i = 0; i < nterms; i++) {
-		ent = find_ent(terms[i], ents, nents);
-		if (ent != NULL)
-			print_ent(ent);
-		else
-			printf("term not found: %s\n\n", terms[i]);
+	for (i = 0; i < nterms; i++)
+		find_and_print(terms[i], ents, nents);
+
+	free_ents(ents, nents);
+
+	return 0;
+}
+
+static int
+repl(struct Dict *dicts, size_t ndicts)
+{
+	DictEnt **ents;
+	char buf[BUFLEN];
+	size_t i, *nents;
+
+	nents = xreallocarray(NULL, ndicts, sizeof(size_t));
+	ents = xreallocarray(NULL, ndicts, sizeof(DictEnt *));
+
+	for (i = 0; i < ndicts; i++) {
+		ents[i] = make_dict(&dicts[i], &nents[i]);
+		if (ents[i] == NULL)
+			die("make_dict(%s): returned NULL\n", dicts[i].rom);
+		qsort(ents[i], nents[i], sizeof(DictEnt), entcmp);
 	}
-	for (i = 0; i < nents; i++) {
-		for (j = 0; j < ents[i].ndefs; j++)
-			free(ents[i].defs[j]);
-		free(ents[i].defs);
-		free(ents[i].term);
+
+	fputs(repl_prompt, stdout);
+	fflush(stdout);
+	while (fgets(buf, LEN(buf), stdin)) {
+		trim(buf);
+		for (i = 0; i < ndicts; i++) {
+			printf("%s\n", dicts[i].name);
+			find_and_print(buf, ents[i], nents[i]);
+		}
+		fputs(repl_prompt, stdout);
+		fflush(stdout);
 	}
+	puts(repl_quit);
+
+	for (i = 0; i < ndicts; i++)
+		free_ents(ents[i], nents[i]);
 	free(ents);
+	free(nents);
 
 	return 0;
 }
@@ -247,7 +303,7 @@ main(int argc, char *argv[])
 	char **terms = NULL, *t;
 	struct Dict *dicts = NULL;
 	size_t ndicts = 0, nterms = 0;
-	int i;
+	int i, iflag = 0;
 
 	argv0 = argv[0];
 
@@ -264,6 +320,9 @@ main(int argc, char *argv[])
 		if (dicts == NULL)
 			die("invalid dictionary name: %s\n", t);
 		break;
+	case 'i':
+		iflag = 1;
+		break;
 	default:
 		usage();
 	} ARGEND
@@ -279,11 +338,14 @@ main(int argc, char *argv[])
 		terms[i] = *argv;
 	}
 
-	if (nterms == 0)
+	if (nterms == 0 && iflag == 0)
 		usage();
 
-	for (i = 0; i < ndicts; i++)
-		find_and_print_defs(&dicts[i], terms, nterms);
+	if (iflag == 0)
+		for (i = 0; i < ndicts; i++)
+			find_and_print_defs(&dicts[i], terms, nterms);
+	else
+		repl(dicts, ndicts);
 
 	free(terms);
 
