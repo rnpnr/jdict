@@ -205,20 +205,6 @@ find_ent(const char *term, DictEnt *ents, size_t nents)
 	return find_ent(term, &ents[nents/2 + 1], nents/2 - 1);
 }
 
-static char *
-fix_newlines(char *str)
-{
-	char *t = str;
-
-	while ((t = strstr(t, "\\n")) != NULL) {
-		t[0] = '\n';
-		t++;
-		memmove(t, t + 1, strlen(t + 1) + 1);
-	}
-
-	return str;
-}
-
 static void
 print_ent(DictEnt *ent)
 {

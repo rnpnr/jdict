@@ -19,6 +19,7 @@ die(const char *fmt, ...)
 	exit(1);
 }
 
+/* trim whitespace from start and end of str */
 void
 trim(char *s)
 {
@@ -34,6 +35,21 @@ trim(char *s)
 	for (; *p && isspace(*p); p++, len--);
 
 	memmove(s, p, len + 1);
+}
+
+/* replace embedded escaped newlines with actual newlines */
+char *
+fix_newlines(char *s)
+{
+	char *t = s;
+
+	while ((t = strstr(t, "\\n")) != NULL) {
+		t[0] = '\n';
+		t++;
+		memmove(t, t + 1, strlen(t + 1) + 1);
+	}
+
+	return s;
 }
 
 void *
