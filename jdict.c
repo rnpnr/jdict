@@ -49,6 +49,13 @@ free_ents(DictEnt *ents, size_t nents)
 	ents = NULL;
 }
 
+static int
+entcmp(const void *va, const void *vb)
+{
+	const DictEnt *a = va, *b = vb;
+	return strcmp(a->term, b->term);
+}
+
 /* takes a token of type YOMI_ENTRY and creates a DictEnt */
 static DictEnt *
 make_ent(YomiTok *toks, size_t ntoks, char *data)
@@ -173,17 +180,10 @@ make_dict(struct Dict *dict, size_t *nents)
 		if (ents == NULL)
 			return NULL;
 	}
+	qsort(ents, *nents, sizeof(DictEnt), entcmp);
 
 	return ents;
 }
-
-static int
-entcmp(const void *va, const void *vb)
-{
-	const DictEnt *a = va, *b = vb;
-	return strcmp(a->term, b->term);
-}
-
 
 static DictEnt *
 find_ent(const char *term, DictEnt *ents, size_t nents)
@@ -234,7 +234,6 @@ find_and_print_defs(struct Dict *dict, char **terms, size_t nterms)
 	ents = make_dict(dict, &nents);
 	if (ents == NULL)
 		return -1;
-	qsort(ents, nents, sizeof(DictEnt), entcmp);
 
 	puts(dict->name);
 	for (i = 0; i < nterms; i++)
@@ -259,7 +258,6 @@ repl(struct Dict *dicts, size_t ndicts)
 		ents[i] = make_dict(&dicts[i], &nents[i]);
 		if (ents[i] == NULL)
 			die("make_dict(%s): returned NULL\n", dicts[i].rom);
-		qsort(ents[i], nents[i], sizeof(DictEnt), entcmp);
 	}
 
 	fputs(repl_prompt, stdout);
