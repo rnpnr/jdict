@@ -279,10 +279,8 @@ main(int argc, char *argv[])
 		terms[i] = *argv;
 	}
 
-	if (nterms == 0) {
-		free(terms);
+	if (nterms == 0)
 		usage();
-	}
 
 	for (i = 0; i < ndicts; i++)
 		find_and_print_defs(&dicts[i], terms, nterms);
