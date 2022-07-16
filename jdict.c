@@ -210,7 +210,7 @@ print_ent(DictEnt *ent)
 {
 	size_t i;
 	for (i = 0; i < ent->ndefs; i++)
-		printf("%s\n", fix_newlines(ent->defs[i]));
+		puts(fix_newlines(ent->defs[i]));
 }
 
 static void
@@ -236,7 +236,7 @@ find_and_print_defs(struct Dict *dict, char **terms, size_t nterms)
 		return -1;
 	qsort(ents, nents, sizeof(DictEnt), entcmp);
 
-	printf("%s\n", dict->name);
+	puts(dict->name);
 	for (i = 0; i < nterms; i++)
 		find_and_print(terms[i], ents, nents);
 
@@ -267,7 +267,7 @@ repl(struct Dict *dicts, size_t ndicts)
 	while (fgets(buf, LEN(buf), stdin)) {
 		trim(buf);
 		for (i = 0; i < ndicts; i++) {
-			printf("%s\n", dicts[i].name);
+			puts(dicts[i].name);
 			find_and_print(buf, ents[i], nents[i]);
 		}
 		fputs(repl_prompt, stdout);
