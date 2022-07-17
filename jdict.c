@@ -185,6 +185,23 @@ make_dict(struct Dict *dict, size_t *nents)
 	return ents;
 }
 
+static DictEnt **
+make_dicts(struct Dict *dicts, size_t ndicts, size_t *nents)
+{
+	DictEnt **ents;
+	size_t i;
+
+	ents = xreallocarray(NULL, ndicts, sizeof(DictEnt *));
+
+	for (i = 0; i < ndicts; i++) {
+		ents[i] = make_dict(&dicts[i], &nents[i]);
+		if (ents[i] == NULL)
+			die("make_dict(%s): returned NULL\n", dicts[i].rom);
+	}
+
+	return ents;
+}
+
 static DictEnt *
 find_ent(const char *term, DictEnt *ents, size_t nents)
 {
@@ -225,26 +242,22 @@ find_and_print(const char *term, DictEnt *ents, size_t nents)
 		printf("term not found: %s\n\n", term);
 }
 
-static int
+static void
 find_and_print_defs(struct Dict *dict, char **terms, size_t nterms)
 {
 	size_t i, nents = 0;
 	DictEnt *ents;
 
-	ents = make_dict(dict, &nents);
-	if (ents == NULL)
-		return -1;
+	ents = *make_dicts(dict, 1, &nents);
 
 	puts(dict->name);
 	for (i = 0; i < nterms; i++)
 		find_and_print(terms[i], ents, nents);
 
 	free_ents(ents, nents);
-
-	return 0;
 }
 
-static int
+static void
 repl(struct Dict *dicts, size_t ndicts)
 {
 	DictEnt **ents;
@@ -252,13 +265,7 @@ repl(struct Dict *dicts, size_t ndicts)
 	size_t i, *nents;
 
 	nents = xreallocarray(NULL, ndicts, sizeof(size_t));
-	ents = xreallocarray(NULL, ndicts, sizeof(DictEnt *));
-
-	for (i = 0; i < ndicts; i++) {
-		ents[i] = make_dict(&dicts[i], &nents[i]);
-		if (ents[i] == NULL)
-			die("make_dict(%s): returned NULL\n", dicts[i].rom);
-	}
+	ents = make_dicts(dicts, ndicts, nents);
 
 	fputs(repl_prompt, stdout);
 	fflush(stdout);
@@ -277,8 +284,6 @@ repl(struct Dict *dicts, size_t ndicts)
 		free_ents(ents[i], nents[i]);
 	free(ents);
 	free(nents);
-
-	return 0;
 }
 
 int
