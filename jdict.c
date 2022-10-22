@@ -49,38 +49,55 @@ free_ents(DictEnt *ents, size_t nents)
 	ents = NULL;
 }
 
-/* FIXME: this isn't the best, we are modifying the value of const ptrs
- * and wasting some memory by not freeing b.
- */
 static int
+entcmp(const void *va, const void *vb)
+{
+	const DictEnt *a = va, *b = vb;
+	return strcmp(a->term, b->term);
+}
+
+
+static void
 merge_ents(DictEnt *a, DictEnt *b)
 {
 	size_t i, nlen = a->ndefs + b->ndefs;
 
 	a->defs = xreallocarray(a->defs, nlen, sizeof(char *));
 
-	for (i = 0; i < b->ndefs; i++) {
+	for (i = 0; i < b->ndefs; i++)
 		a->defs[a->ndefs + i] = b->defs[i];
-		b->defs[i] = NULL;
-	}
 	a->ndefs = nlen;
-
-	free(b->defs);
-	b->defs = NULL;
-	b->ndefs = 0;
-
-	return 1;
 }
 
-static int
-entcmp(const void *va, const void *vb)
+static DictEnt *
+dedup(DictEnt *ents, size_t *nents)
 {
-	int r;
-	const DictEnt *a = va, *b = vb;
+	size_t i, len = 0;
+	DictEnt *dents = xreallocarray(NULL, *nents, sizeof(DictEnt));
 
-	if (!(r = strcmp(a->term, b->term)))
-		return merge_ents((DictEnt *)a, (DictEnt *)b);
-	return r;
+	for (i = 0; i < *nents - 1; i++) {
+		if (!entcmp(&ents[i], &ents[i+1])) {
+			/* merge and copy then skip the next ent */
+			merge_ents(&ents[i], &ents[i+1]);
+			memcpy(&dents[len++], &ents[i++], sizeof(DictEnt));
+			/* don't leak memory after merging */
+			free(ents[i].term);
+			free(ents[i].defs);
+		} else {
+			memcpy(&dents[len++], &ents[i], sizeof(DictEnt));
+		}
+	}
+	/* move last ent if it wasn't a duplicate */
+	if (i + 1 < *nents)
+		memcpy(&dents[len++], &ents[i+1], sizeof(DictEnt));
+
+	/* all entries were copied to dents so old ents can be freed.
+	 * the term and defs ptrs shouldn't be removed since they still
+	 * to their respective data. the duplicate ones are freed above
+	 */
+	free(ents);
+	*nents = len;
+	return dents;
 }
 
 /* takes a token of type YOMI_ENTRY and creates a DictEnt */
@@ -217,6 +234,7 @@ make_dict(struct Dict *dict, size_t *nents)
 			return NULL;
 	}
 	qsort(ents, *nents, sizeof(DictEnt), entcmp);
+	ents = dedup(ents, nents);
 
 	return ents;
 }
