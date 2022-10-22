@@ -49,11 +49,38 @@ free_ents(DictEnt *ents, size_t nents)
 	ents = NULL;
 }
 
+/* FIXME: this isn't the best, we are modifying the value of const ptrs
+ * and wasting some memory by not freeing b.
+ */
+static int
+merge_ents(DictEnt *a, DictEnt *b)
+{
+	size_t i, nlen = a->ndefs + b->ndefs;
+
+	a->defs = xreallocarray(a->defs, nlen, sizeof(char *));
+
+	for (i = 0; i < b->ndefs; i++) {
+		a->defs[a->ndefs + i] = b->defs[i];
+		b->defs[i] = NULL;
+	}
+	a->ndefs = nlen;
+
+	free(b->defs);
+	b->defs = NULL;
+	b->ndefs = 0;
+
+	return 1;
+}
+
 static int
 entcmp(const void *va, const void *vb)
 {
+	int r;
 	const DictEnt *a = va, *b = vb;
-	return strcmp(a->term, b->term);
+
+	if (!(r = strcmp(a->term, b->term)))
+		return merge_ents((DictEnt *)a, (DictEnt *)b);
+	return r;
 }
 
 /* takes a token of type YOMI_ENTRY and creates a DictEnt */
