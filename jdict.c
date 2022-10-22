@@ -58,30 +58,39 @@ entcmp(const void *va, const void *vb)
 
 /* takes a token of type YOMI_ENTRY and creates a DictEnt */
 static DictEnt *
-make_ent(YomiTok *toks, size_t ntoks, char *data)
+make_ent(YomiTok *toks, char *data)
 {
 	size_t i;
 	DictEnt *d;
-	YomiTok *tstr, *tdefs;
+	YomiTok *tstr = NULL, *tdefs = NULL;
 
 	if (toks[0].type != YOMI_ENTRY)
 		return NULL;
 
-	/* FIXME: hacky but works */
-	/* definition array = YOMI_ENTRY tok + 6 */
-	if (ntoks - 6 < 0)
+	for (i = 1; i < toks[0].len; i++)
+		switch (toks[i].type) {
+		case YOMI_STR:
+			if (tstr == NULL)
+				tstr = &toks[i];
+			break;
+		case YOMI_ARRAY:
+			if (tdefs == NULL)
+				tdefs = &toks[i];
+		default: /* FALLTHROUGH */
+			break;
+		}
+
+	/* check if entry was valid */
+	if (tdefs == NULL || tstr == NULL)
 		return NULL;
-	tdefs = toks + 6;
-	/* term = YOMI_ENTRY tok + 1 */
-	tstr = toks + 1;
 
 	d = xreallocarray(NULL, 1, sizeof(DictEnt));
 	d->term = strndup(data + tstr->start, tstr->end - tstr->start);
 	d->ndefs = tdefs->len;
 	d->defs = xreallocarray(NULL, d->ndefs, sizeof(char *));
 	for (i = 1; i <= d->ndefs; i++)
-		d->defs[i-1] = strndup(data + (tdefs + i)->start,
-		                       (tdefs + i)->end - (tdefs + i)->start);
+		d->defs[i-1] = strndup(data + tdefs[i].start,
+		                       tdefs[i].end - tdefs[i].start);
 
 	return d;
 }
@@ -135,7 +144,7 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
 		if (toks[i].type != YOMI_ENTRY)
 			continue;
 
-		e = make_ent(&toks[i], r - i, data);
+		e = make_ent(&toks[i], data);
 		if (e != NULL) {
 			memcpy(&ents[(*nents)++], e, sizeof(DictEnt));
 		} else {
