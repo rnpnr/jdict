@@ -70,17 +70,20 @@ merge_ents(DictEnt *a, DictEnt *b)
 static DictEnt *
 dedup(DictEnt *ents, size_t *nents)
 {
-	size_t i, len = 0;
+	size_t i, j, len = 0;
 	DictEnt *dents = xreallocarray(NULL, *nents, sizeof(DictEnt));
 
 	for (i = 0; i < *nents - 1; i++) {
 		if (!entcmp(&ents[i], &ents[i+1])) {
-			/* merge and copy then skip the next ent */
-			merge_ents(&ents[i], &ents[i+1]);
-			memcpy(&dents[len++], &ents[i++], sizeof(DictEnt));
-			/* don't leak memory after merging */
-			free(ents[i].term);
-			free(ents[i].defs);
+			for (j = i+1; !entcmp(&ents[i], &ents[j]); j++) {
+				merge_ents(&ents[i], &ents[j]);
+				/* don't leak memory after merging */
+				free(ents[j].term);
+				free(ents[j].defs);
+			}
+			memcpy(&dents[len++], &ents[i], sizeof(DictEnt));
+			/* skip over duplicates */
+			i = j;
 		} else {
 			memcpy(&dents[len++], &ents[i], sizeof(DictEnt));
 		}
