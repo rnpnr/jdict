@@ -46,7 +46,6 @@ free_ents(DictEnt *ents, size_t nents)
 		free(ents[i].term);
 	}
 	free(ents);
-	ents = NULL;
 }
 
 static int
@@ -55,7 +54,6 @@ entcmp(const void *va, const void *vb)
 	const DictEnt *a = va, *b = vb;
 	return strcmp(a->term, b->term);
 }
-
 
 static void
 merge_ents(DictEnt *a, DictEnt *b)
@@ -93,7 +91,7 @@ dedup(DictEnt *ents, size_t *nents)
 
 	/* all entries were copied to dents so old ents can be freed.
 	 * the term and defs ptrs shouldn't be removed since they still
-	 * to their respective data. the duplicate ones are freed above
+	 * point to their respective data. the duplicates were freed above
 	 */
 	free(ents);
 	*nents = len;
