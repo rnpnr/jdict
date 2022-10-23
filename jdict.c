@@ -73,20 +73,14 @@ dedup(DictEnt *ents, size_t *nents)
 	size_t i, j, len = 0;
 	DictEnt *dents = xreallocarray(NULL, *nents, sizeof(DictEnt));
 
-	for (i = 0; i < *nents - 1; i++) {
-		if (!entcmp(&ents[i], &ents[i+1])) {
-			for (j = i+1; !entcmp(&ents[i], &ents[j]); j++) {
-				merge_ents(&ents[i], &ents[j]);
-				/* don't leak memory after merging */
-				free(ents[j].term);
-				free(ents[j].defs);
-			}
-			memcpy(&dents[len++], &ents[i], sizeof(DictEnt));
-			/* skip over duplicates */
-			i = j;
-		} else {
-			memcpy(&dents[len++], &ents[i], sizeof(DictEnt));
+	for (i = 0; i < *nents - 1; i = j) {
+		for (j = i+1; j < *nents && !entcmp(&ents[i], &ents[j]); j++) {
+			merge_ents(&ents[i], &ents[j]);
+			/* don't leak memory after merging */
+			free(ents[j].term);
+			free(ents[j].defs);
 		}
+		memcpy(&dents[len++], &ents[i], sizeof(DictEnt));
 	}
 	/* move last ent if it wasn't a duplicate */
 	if (i + 1 < *nents)
