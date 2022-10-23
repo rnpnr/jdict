@@ -92,7 +92,7 @@ dedup(DictEnt *ents, size_t *nents)
 	 */
 	free(ents);
 	*nents = len;
-	return dents;
+	return xreallocarray(dents, *nents, sizeof(DictEnt));
 }
 
 /* takes a token of type YOMI_ENTRY and creates a DictEnt */
