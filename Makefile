@@ -10,7 +10,7 @@ config.h:
 	cp config.def.h $@
 
 .c.o:
-	$(CC) $(CFLAGS) -o $@ -c $<
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ -c $<
 
 $(OBJ): config.h
 
