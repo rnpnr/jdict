@@ -316,16 +316,16 @@ repl(struct Dict *dicts, size_t ndicts)
 	nents = xreallocarray(NULL, ndicts, sizeof(size_t));
 	ents = make_dicts(dicts, ndicts, nents);
 
-	fputs(repl_prompt, stdout);
-	fflush(stdout);
-	while (fgets(buf, LEN(buf), stdin)) {
+	for (;;) {
+		fputs(repl_prompt, stdout);
+		fflush(stdout);
+		if (fgets(buf, LEN(buf), stdin) == NULL)
+			break;
 		trim(buf);
 		for (i = 0; i < ndicts; i++) {
 			puts(dicts[i].name);
 			find_and_print(buf, ents[i], nents[i]);
 		}
-		fputs(repl_prompt, stdout);
-		fflush(stdout);
 	}
 	puts(repl_quit);
 
