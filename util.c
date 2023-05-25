@@ -26,13 +26,12 @@ die(const char *fmt, ...)
 char *
 trim(char *s)
 {
-	char *p = s;
-	size_t len = strlen(s);
+	char *p = &s[strlen(s)-1];
 
-	for (; isspace(p[len-1]); p[--len] = 0);
-	for (; *p && isspace(*p); p++);
+	for (; isspace(*p); *p = 0, p--);
+	for (; *s && isspace(*s); s++);
 
-	return p;
+	return s;
 }
 
 /* replace embedded escaped newlines with actual newlines */
