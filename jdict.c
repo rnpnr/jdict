@@ -321,10 +321,9 @@ repl(struct Dict *dicts, size_t ndicts)
 		fflush(stdout);
 		if (fgets(buf, LEN(buf), stdin) == NULL)
 			break;
-		trim(buf);
 		for (i = 0; i < ndicts; i++) {
 			puts(dicts[i].name);
-			find_and_print(buf, ents[i], nents[i]);
+			find_and_print(trim(buf), ents[i], nents[i]);
 		}
 	}
 	puts(repl_quit);

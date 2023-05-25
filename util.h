@@ -3,5 +3,5 @@
 
 void die(const char *, ...);
 char *fix_newlines(char *);
-void trim(char *);
+char *trim(char *);
 void *xreallocarray(void *, size_t, size_t);

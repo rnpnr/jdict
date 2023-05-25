@@ -19,22 +19,20 @@ die(const char *fmt, ...)
 	exit(1);
 }
 
-/* trim whitespace from start and end of str */
-void
+/*
+ * trim whitespace from start and end of str
+ * returns start of trimmed str
+ */
+char *
 trim(char *s)
 {
 	char *p = s;
-	size_t len;
-
-	if (s == NULL)
-		return;
-
-	len = strlen(s);
+	size_t len = strlen(s);
 
 	for (; isspace(p[len-1]); p[--len] = 0);
-	for (; *p && isspace(*p); p++, len--);
+	for (; *p && isspace(*p); p++);
 
-	memmove(s, p, len + 1);
+	return p;
 }
 
 /* replace embedded escaped newlines with actual newlines */
