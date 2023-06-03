@@ -122,7 +122,7 @@ int
 yomi_parse(YomiParser *p, YomiTok *toks, size_t ntoks,
     const char *bank, size_t blen)
 {
-	YomiTok *tok, *t;
+	YomiTok *tok;
 	int r, count = p->toknext;
 
 	if (toks == NULL)
@@ -137,16 +137,12 @@ yomi_parse(YomiParser *p, YomiTok *toks, size_t ntoks,
 			if (!tok)
 				return YOMI_ERROR_NOMEM;
 
-			t = NULL;
-			if (p->parent != -1) {
-				t = &toks[p->parent];
-				t->len++;
-			}
-
-			if (t && t->type == YOMI_ARRAY)
-				tok->type = YOMI_ENTRY;
-			else
+			if (p->parent == -1 || toks[p->parent].type != YOMI_ARRAY) {
 				tok->type = YOMI_ARRAY;
+			} else {
+				tok->type = YOMI_ENTRY;
+				toks[p->parent].len++;
+			}
 
 			tok->start = p->pos;
 			tok->parent = p->parent;
