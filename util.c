@@ -67,7 +67,7 @@ xmemdup(void *src, ptrdiff_t len)
 	char *p;
 	if (len < 0)
 		die("xmemdup(): negative len\n");
-	p = xreallocarray(NULL, 1, len);
+	p = xreallocarray(NULL, 1, len + 1);
 	p[len] = 0;
 	return memcpy(p, src, len);
 }
