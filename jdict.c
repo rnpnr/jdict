@@ -222,6 +222,8 @@ make_dict(struct Dict *dict, size_t *nents)
 	nbanks--;
 
 	closedir(dir);
+	if (nbanks == 0)
+		return NULL;
 
 	for (i = 1; i <= nbanks; i++) {
 		snprintf(tbank, LEN(tbank), "%s/term_bank_%d.json", path, (int)i);
@@ -299,6 +301,11 @@ find_and_print_defs(struct Dict *dict, char **terms, size_t nterms)
 	DictEnt *ents;
 
 	ents = *make_dicts(dict, 1, &nents);
+	if (!ents) {
+		fputs("failed to allocate dict: ", stdout);
+		puts(dict->rom);
+		return;
+	}
 
 	puts(dict->name);
 	for (i = 0; i < nterms; i++)
