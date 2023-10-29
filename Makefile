@@ -1,8 +1,7 @@
 # See LICENSE for license details.
 include config.mk
 
-SRC = jdict.c yomidict.c util.c
-OBJ = $(SRC:.c=.o)
+OBJ = jdict.o yomidict.o util.o
 
 default: jdict
 
@@ -12,7 +11,7 @@ config.h:
 .c.o:
 	$(CC) $(CFLAGS) $(CPPFLAGS) -o $@ -c $<
 
-$(OBJ): config.h
+$(OBJ): config.h config.mk
 
 jdict: $(OBJ)
 	$(CC) -o $@ $(OBJ) $(LDFLAGS)
