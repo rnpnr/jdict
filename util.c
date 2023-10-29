@@ -1,6 +1,7 @@
 /* See LICENSE for license details. */
 #include <ctype.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,4 +59,15 @@ xreallocarray(void *o, size_t n, size_t s)
 		die("reallocarray()\n");
 
 	return new;
+}
+
+char *
+xmemdup(void *src, ptrdiff_t len)
+{
+	char *p;
+	if (len < 0)
+		die("xmemdup(): negative len\n");
+	p = xreallocarray(NULL, 1, len);
+	p[len] = 0;
+	return memcpy(p, src, len);
 }

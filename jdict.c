@@ -2,6 +2,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -124,12 +125,12 @@ make_ent(YomiTok *toks, char *data)
 		return NULL;
 
 	d = xreallocarray(NULL, 1, sizeof(DictEnt));
-	d->term = strndup(data + tstr->start, tstr->end - tstr->start);
+	d->term = xmemdup(data + tstr->start, tstr->end - tstr->start);
 	d->ndefs = tdefs->len;
 	d->defs = xreallocarray(NULL, d->ndefs, sizeof(char *));
 	for (i = 1; i <= d->ndefs; i++)
-		d->defs[i-1] = strndup(data + tdefs[i].start,
-		                       tdefs[i].end - tdefs[i].start);
+		d->defs[i - 1] = xmemdup(data + tdefs[i].start,
+		                         tdefs[i].end - tdefs[i].start);
 
 	return d;
 }
