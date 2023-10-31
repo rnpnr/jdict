@@ -37,54 +37,25 @@ yomi_alloc_tok(YomiParser *p, YomiTok *toks, size_t ntoks)
 static int
 yomi_parse_str(YomiParser *p, YomiTok *t, const char *s, size_t slen)
 {
-	size_t i, start = p->pos;
-	int c;
+	size_t start = p->pos++;
 
-	/* skip leading quote */
-	p->pos++;
-
-	for (; p->pos < slen && s[p->pos]; p->pos++) {
-		c = s[p->pos];
+	for (; p->pos < slen; p->pos++) {
+		/* skip over escaped " */
+		if (s[p->pos] == '\\' && p->pos + 1 < slen && s[p->pos + 1] == '\"') {
+			p->pos++;
+			continue;
+		}
 
 		/* end of str */
-		if (c == '\"') {
+		if (s[p->pos] == '\"') {
 			t->start = start + 1;
 			t->end = p->pos;
 			t->parent = p->parent;
 			t->type = YOMI_STR;
 			return 0;
 		}
-
-		/* handle escape chars */
-		if (c == '\\' && p->pos + 1 < slen) {
-			p->pos++;
-			switch (s[p->pos]) {
-			case '/': /* FALLTHROUGH */
-			case '\"':
-			case '\\':
-			case 'b':
-			case 'f':
-			case 'n':
-			case 'r':
-			case 't':
-				break;
-			case 'u': /* unicode symbol */
-				p->pos++;
-				for (i = 0; i < 4 && p->pos < slen && s[p->pos]; i++) {
-					if (!isxdigit(s[p->pos])) {
-						p->pos = start;
-						return YOMI_ERROR_INVAL;
-					}
-					p->pos++;
-				}
-				p->pos--;
-				break;
-			default:
-				p->pos = start;
-				return YOMI_ERROR_INVAL;
-			}
-		}
 	}
+
 	p->pos = start;
 	return YOMI_ERROR_MALFO;
 }
