@@ -8,16 +8,16 @@ typedef enum {
 } YomiType;
 
 typedef struct {
-	size_t start;
-	size_t end;
-	size_t len;
+	unsigned long start;
+	unsigned long end;
+	unsigned long len;
 	int parent; /* parent tok number */
 	YomiType type;
 } YomiTok;
 
 typedef struct {
-	size_t pos; /* offset in yomi bank */
-	size_t toknext;
+	unsigned long pos; /* offset in yomi bank */
+	unsigned long toknext;
 	int parent; /* parent tok of current element */
 } YomiParser;
 
@@ -28,4 +28,4 @@ enum {
 };
 
 void yomi_init(YomiParser *);
-int yomi_parse(YomiParser *, YomiTok *, size_t, const char *, size_t);
+int yomi_parse(YomiParser *, YomiTok *, unsigned long, const char *, unsigned long);

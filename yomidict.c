@@ -4,10 +4,12 @@
  * all it knows how to do. Finding and reading term banks as well as searching
  * through parsed entries should be implemented elsewhere.
  */
-#include <ctype.h>
-#include <stddef.h>
-
 #include "yomidict.h"
+
+#define NULL 0
+#define ul unsigned long
+
+#define ISDIGIT(c) ((c) >= '0' && (c) <= '9')
 
 void
 yomi_init(YomiParser *p)
@@ -18,7 +20,7 @@ yomi_init(YomiParser *p)
 }
 
 static YomiTok *
-yomi_alloc_tok(YomiParser *p, YomiTok *toks, size_t ntoks)
+yomi_alloc_tok(YomiParser *p, YomiTok *toks, ul ntoks)
 {
 	YomiTok *t;
 
@@ -35,9 +37,9 @@ yomi_alloc_tok(YomiParser *p, YomiTok *toks, size_t ntoks)
 }
 
 static int
-yomi_parse_str(YomiParser *p, YomiTok *t, const char *s, size_t slen)
+yomi_parse_str(YomiParser *p, YomiTok *t, const char *s, ul slen)
 {
-	size_t start = p->pos++;
+	ul start = p->pos++;
 
 	for (; p->pos < slen; p->pos++) {
 		/* skip over escaped " */
@@ -61,9 +63,9 @@ yomi_parse_str(YomiParser *p, YomiTok *t, const char *s, size_t slen)
 }
 
 static int
-yomi_parse_num(YomiParser *p, YomiTok *t, const char *s, size_t slen)
+yomi_parse_num(YomiParser *p, YomiTok *t, const char *s, ul slen)
 {
-	size_t start = p->pos;
+	ul start = p->pos;
 
 	for (; p->pos < slen && s[p->pos]; p->pos++) {
 		switch (s[p->pos]) {
@@ -80,7 +82,7 @@ yomi_parse_num(YomiParser *p, YomiTok *t, const char *s, size_t slen)
 			p->pos--;
 			return 0;
 		}
-		if (!isdigit(s[p->pos])) {
+		if (!ISDIGIT(s[p->pos])) {
 			p->pos = start;
 			return YOMI_ERROR_INVAL;
 		}
@@ -90,8 +92,7 @@ yomi_parse_num(YomiParser *p, YomiTok *t, const char *s, size_t slen)
 }
 
 int
-yomi_parse(YomiParser *p, YomiTok *toks, size_t ntoks,
-    const char *bank, size_t blen)
+yomi_parse(YomiParser *p, YomiTok *toks, ul ntoks, const char *bank, ul blen)
 {
 	YomiTok *tok;
 	int r, count = p->toknext;
