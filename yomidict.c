@@ -4,30 +4,45 @@
  * all it knows how to do. Finding and reading term banks as well as searching
  * through parsed entries should be implemented elsewhere.
  */
+#include <stddef.h>
+#include <stdlib.h>
+
+#include "util.h"
 #include "yomidict.h"
 
-#define NULL 0
 #define ul unsigned long
 
 #define ISDIGIT(c) ((c) >= '0' && (c) <= '9')
 
-void
-yomi_init(YomiParser *p)
+struct YomiScanner {
+	const char *data;
+	ul len;
+	ul pos; /* offset in yomi bank */
+	ul toknext;
+	int parent; /* parent tok of current element */
+};
+
+YomiScanner *
+yomi_scanner_new(const char *data, unsigned long datalen)
 {
-	p->pos = 0;
-	p->toknext = 0;
-	p->parent = -1;
+	YomiScanner *s = xreallocarray(NULL, sizeof(YomiScanner), 1);
+	s->data = data;
+	s->len = datalen;
+	s->pos = 0;
+	s->toknext = 0;
+	s->parent = -1;
+	return s;
 }
 
 static YomiTok *
-yomi_alloc_tok(YomiParser *p, YomiTok *toks, ul ntoks)
+yomi_alloc_tok(YomiScanner *s, YomiTok *toks, ul ntoks)
 {
 	YomiTok *t;
 
-	if (ntoks <= p->toknext)
+	if (ntoks <= s->toknext)
 		return NULL;
 
-	t = &toks[p->toknext++];
+	t = &toks[s->toknext++];
 	t->parent = -1;
 	t->start = -1;
 	t->end = -1;
@@ -37,100 +52,102 @@ yomi_alloc_tok(YomiParser *p, YomiTok *toks, ul ntoks)
 }
 
 static int
-yomi_parse_str(YomiParser *p, YomiTok *t, const char *s, ul slen)
+yomi_parse_str(YomiScanner *s, YomiTok *t)
 {
-	ul start = p->pos++;
+	const char *d = s->data;
+	ul start = s->pos++;
 
-	for (; p->pos < slen; p->pos++) {
+	for (; s->pos < s->len; s->pos++) {
 		/* skip over escaped " */
-		if (s[p->pos] == '\\' && p->pos + 1 < slen && s[p->pos + 1] == '\"') {
-			p->pos++;
+		if (d[s->pos] == '\\' && s->pos + 1 < s->len && d[s->pos + 1] == '\"') {
+			s->pos++;
 			continue;
 		}
 
 		/* end of str */
-		if (s[p->pos] == '\"') {
+		if (d[s->pos] == '\"') {
 			t->start = start + 1;
-			t->end = p->pos;
-			t->parent = p->parent;
+			t->end = s->pos;
+			t->parent = s->parent;
 			t->type = YOMI_STR;
 			return 0;
 		}
 	}
 
-	p->pos = start;
+	s->pos = start;
 	return YOMI_ERROR_MALFO;
 }
 
 static int
-yomi_parse_num(YomiParser *p, YomiTok *t, const char *s, ul slen)
+yomi_parse_num(YomiScanner *s, YomiTok *t)
 {
-	ul start = p->pos;
+	const char *d = s->data;
+	ul start = s->pos;
 
-	for (; p->pos < slen && s[p->pos]; p->pos++) {
-		switch (s[p->pos]) {
+	for (; s->pos < s->len && d[s->pos]; s->pos++) {
+		switch (d[s->pos]) {
 		case ' ':
 		case ',':
 		case '\n':
 		case '\r':
 		case '\t':
 		case ']':
-			t->parent = p->parent;
+			t->parent = s->parent;
 			t->start = start;
-			t->end = p->pos;
+			t->end = s->pos;
 			t->type = YOMI_NUM;
-			p->pos--;
+			s->pos--;
 			return 0;
 		}
-		if (!ISDIGIT(s[p->pos])) {
-			p->pos = start;
+		if (!ISDIGIT(d[s->pos])) {
+			s->pos = start;
 			return YOMI_ERROR_INVAL;
 		}
 	}
-	p->pos = start;
+	s->pos = start;
 	return YOMI_ERROR_MALFO;
 }
 
 int
-yomi_parse(YomiParser *p, YomiTok *toks, ul ntoks, const char *bank, ul blen)
+yomi_parse(YomiScanner *s, YomiTok *toks, ul ntoks)
 {
 	YomiTok *tok;
-	int r, count = p->toknext;
+	int r, count = s->toknext;
 
 	if (toks == NULL)
 		return -1;
 
-	for (; p->pos < blen && bank[p->pos]; p->pos++) {
-		switch (bank[p->pos]) {
+	for (; s->pos < s->len && s->data[s->pos]; s->pos++) {
+		switch (s->data[s->pos]) {
 		case '[': /* YOMI_ARRAY || YOMI_ENTRY */
 			count++;
 
-			tok = yomi_alloc_tok(p, toks, ntoks);
+			tok = yomi_alloc_tok(s, toks, ntoks);
 			if (!tok)
 				return YOMI_ERROR_NOMEM;
 
-			if (p->parent == -1 || toks[p->parent].type != YOMI_ARRAY) {
+			if (s->parent == -1 || toks[s->parent].type != YOMI_ARRAY) {
 				tok->type = YOMI_ARRAY;
 			} else {
 				tok->type = YOMI_ENTRY;
-				toks[p->parent].len++;
+				toks[s->parent].len++;
 			}
 
-			tok->start = p->pos;
-			tok->parent = p->parent;
-			p->parent = p->toknext - 1; /* the current tok */
+			tok->start = s->pos;
+			tok->parent = s->parent;
+			s->parent = s->toknext - 1; /* the current tok */
 			break;
 
 		case ']':
-			if (p->toknext < 1 || p->parent == -1)
+			if (s->toknext < 1 || s->parent == -1)
 				return YOMI_ERROR_INVAL;
 
-			tok = &toks[p->parent];
+			tok = &toks[s->parent];
 			for (;;) {
 				if (tok->start != -1 && tok->end == -1) {
 					/* inside unfinished tok */
-					tok->end = p->pos + 1;
-					p->parent = tok->parent;
+					tok->end = s->pos + 1;
+					s->parent = tok->parent;
 					break;
 				} else if (tok->parent == -1) {
 					 /* this is the super tok */
@@ -142,24 +159,24 @@ yomi_parse(YomiParser *p, YomiTok *toks, ul ntoks, const char *bank, ul blen)
 			break;
 
 		case ',':
-			if (p->parent != -1 &&
-			    toks[p->parent].type != YOMI_ARRAY &&
-			    toks[p->parent].type != YOMI_ENTRY)
-				p->parent = toks[p->parent].parent;
+			if (s->parent != -1 &&
+			    toks[s->parent].type != YOMI_ARRAY &&
+			    toks[s->parent].type != YOMI_ENTRY)
+				s->parent = toks[s->parent].parent;
 			break;
 
 		case '\"':
-			tok = yomi_alloc_tok(p, toks, ntoks);
+			tok = yomi_alloc_tok(s, toks, ntoks);
 			if (tok == NULL)
 				return YOMI_ERROR_NOMEM;
 
-			r = yomi_parse_str(p, tok, bank, blen);
+			r = yomi_parse_str(s, tok);
 			if (r != 0)
 				return r;
 
 			count++;
-			if (p->parent != -1)
-				toks[p->parent].len++;
+			if (s->parent != -1)
+				toks[s->parent].len++;
 			else
 				toks[0].len++;
 
@@ -170,17 +187,17 @@ yomi_parse(YomiParser *p, YomiTok *toks, ul ntoks, const char *bank, ul blen)
 			break;
 
 		default:
-			tok = yomi_alloc_tok(p, toks, ntoks);
+			tok = yomi_alloc_tok(s, toks, ntoks);
 			if (tok == NULL)
 				return YOMI_ERROR_NOMEM;
 
-			r = yomi_parse_num(p, tok, bank, blen);
+			r = yomi_parse_num(s, tok);
 			if (r != 0)
 				return r;
 
 			count++;
-			if (p->parent != -1)
-				toks[p->parent].len++;
+			if (s->parent != -1)
+				toks[s->parent].len++;
 			else
 				toks[0].len++;
 		}

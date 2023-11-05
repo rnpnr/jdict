@@ -147,7 +147,7 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
 	size_t i, flen;
 	char *data;
 	YomiTok *toks = NULL;
-	YomiParser p;
+	YomiScanner *s = NULL;
 	DictEnt *e;
 
 	if ((fd = open(tbank, O_RDONLY)) < 0)
@@ -165,8 +165,8 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
 		die("stride multiplication overflowed: %s\n", tbank);
 	toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
 
-	yomi_init(&p);
-	while ((r = yomi_parse(&p, toks, ntoks, data, flen)) < 0) {
+	s = yomi_scanner_new(data, flen);
+	while ((r = yomi_parse(s, toks, ntoks)) < 0) {
 		switch (r) {
 		case YOMI_ERROR_NOMEM:
 			/* allocate more mem and try again */
@@ -205,6 +205,7 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
 cleanup:
 	munmap(data, flen);
 	free(toks);
+	free(s);
 
 	return ents;
 }

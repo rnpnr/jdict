@@ -15,11 +15,7 @@ typedef struct {
 	YomiType type;
 } YomiTok;
 
-typedef struct {
-	unsigned long pos; /* offset in yomi bank */
-	unsigned long toknext;
-	int parent; /* parent tok of current element */
-} YomiParser;
+typedef struct YomiScanner YomiScanner;
 
 enum {
 	YOMI_ERROR_NOMEM = -1,
@@ -27,5 +23,5 @@ enum {
 	YOMI_ERROR_MALFO = -3
 };
 
-void yomi_init(YomiParser *);
-int yomi_parse(YomiParser *, YomiTok *, unsigned long, const char *, unsigned long);
+YomiScanner *yomi_scanner_new(const char *, unsigned long);
+int yomi_parse(YomiScanner *, YomiTok *, unsigned long);
