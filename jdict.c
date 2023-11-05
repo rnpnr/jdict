@@ -166,7 +166,7 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
 	toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
 
 	s = yomi_scanner_new(data, flen);
-	while ((r = yomi_parse(s, toks, ntoks)) < 0) {
+	while ((r = yomi_scan(s, toks, ntoks)) < 0) {
 		switch (r) {
 		case YOMI_ERROR_NOMEM:
 			/* allocate more mem and try again */

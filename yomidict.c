@@ -1,8 +1,9 @@
 /* See LICENSE for license details.
  *
- * yomidict.c implements a simple parser for yomichan dictionary text. This is
- * all it knows how to do. Finding and reading term banks as well as searching
- * through parsed entries should be implemented elsewhere.
+ * yomidict.c implements a simple lexer for yomichan dictionary
+ * text. This is all it knows how to do. Finding and reading term
+ * banks as well as searching through lexed tokens should be
+ * implemented elsewhere.
  */
 #include <stddef.h>
 #include <stdlib.h>
@@ -35,7 +36,7 @@ yomi_scanner_new(const char *data, unsigned long datalen)
 }
 
 static YomiTok *
-yomi_alloc_tok(YomiScanner *s, YomiTok *toks, ul ntoks)
+alloctok(YomiScanner *s, YomiTok *toks, ul ntoks)
 {
 	YomiTok *t;
 
@@ -52,7 +53,7 @@ yomi_alloc_tok(YomiScanner *s, YomiTok *toks, ul ntoks)
 }
 
 static int
-yomi_parse_str(YomiScanner *s, YomiTok *t)
+string(YomiScanner *s, YomiTok *t)
 {
 	const char *d = s->data;
 	ul start = s->pos++;
@@ -79,7 +80,7 @@ yomi_parse_str(YomiScanner *s, YomiTok *t)
 }
 
 static int
-yomi_parse_num(YomiScanner *s, YomiTok *t)
+number(YomiScanner *s, YomiTok *t)
 {
 	const char *d = s->data;
 	ul start = s->pos;
@@ -109,7 +110,7 @@ yomi_parse_num(YomiScanner *s, YomiTok *t)
 }
 
 int
-yomi_parse(YomiScanner *s, YomiTok *toks, ul ntoks)
+yomi_scan(YomiScanner *s, YomiTok *toks, ul ntoks)
 {
 	YomiTok *tok;
 	int r, count = s->toknext;
@@ -122,7 +123,7 @@ yomi_parse(YomiScanner *s, YomiTok *toks, ul ntoks)
 		case '[': /* YOMI_ARRAY || YOMI_ENTRY */
 			count++;
 
-			tok = yomi_alloc_tok(s, toks, ntoks);
+			tok = alloctok(s, toks, ntoks);
 			if (!tok)
 				return YOMI_ERROR_NOMEM;
 
@@ -166,11 +167,11 @@ yomi_parse(YomiScanner *s, YomiTok *toks, ul ntoks)
 			break;
 
 		case '\"':
-			tok = yomi_alloc_tok(s, toks, ntoks);
+			tok = alloctok(s, toks, ntoks);
 			if (tok == NULL)
 				return YOMI_ERROR_NOMEM;
 
-			r = yomi_parse_str(s, tok);
+			r = string(s, tok);
 			if (r != 0)
 				return r;
 
@@ -187,11 +188,11 @@ yomi_parse(YomiScanner *s, YomiTok *toks, ul ntoks)
 			break;
 
 		default:
-			tok = yomi_alloc_tok(s, toks, ntoks);
+			tok = alloctok(s, toks, ntoks);
 			if (tok == NULL)
 				return YOMI_ERROR_NOMEM;
 
-			r = yomi_parse_num(s, tok);
+			r = number(s, tok);
 			if (r != 0)
 				return r;
 

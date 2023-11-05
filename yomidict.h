@@ -24,4 +24,4 @@ enum {
 };
 
 YomiScanner *yomi_scanner_new(const char *, unsigned long);
-int yomi_parse(YomiScanner *, YomiTok *, unsigned long);
+int yomi_scan(YomiScanner *, YomiTok *, unsigned long);
