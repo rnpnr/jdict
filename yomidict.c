@@ -85,7 +85,7 @@ number(YomiScanner *s, YomiTok *t)
 	const char *d = s->data;
 	ul start = s->pos;
 
-	for (; s->pos < s->len && d[s->pos]; s->pos++) {
+	for (; s->pos < s->len; s->pos++) {
 		switch (d[s->pos]) {
 		case ' ':
 		case ',':
@@ -118,7 +118,7 @@ yomi_scan(YomiScanner *s, YomiTok *toks, ul ntoks)
 	if (toks == NULL)
 		return -1;
 
-	for (; s->pos < s->len && s->data[s->pos]; s->pos++) {
+	for (; s->pos < s->len; s->pos++) {
 		switch (s->data[s->pos]) {
 		case '[': /* YOMI_ARRAY || YOMI_ENTRY */
 			count++;
