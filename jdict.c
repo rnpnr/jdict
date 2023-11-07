@@ -104,8 +104,10 @@ make_ent(YomiTok *toks, char *data)
 	DictEnt *d;
 	YomiTok *tstr = NULL, *tdefs = NULL;
 
-	if (toks[0].type != YOMI_ENTRY)
+	if (toks[0].type != YOMI_ENTRY) {
+		fprintf(stderr, "toks[0].type = %d\n", toks[0].type);
 		return NULL;
+	}
 
 	for (i = 1; i < toks[0].len; i++)
 		switch (toks[i].type) {
@@ -121,8 +123,11 @@ make_ent(YomiTok *toks, char *data)
 		}
 
 	/* check if entry was valid */
-	if (tdefs == NULL || tstr == NULL)
+	if (tdefs == NULL || tstr == NULL) {
+		fprintf(stderr, "make_ent: %s == NULL\n",
+		        tdefs == NULL? "tdefs" : "tstr");
 		return NULL;
+	}
 
 	d = xreallocarray(NULL, 1, sizeof(DictEnt));
 	d->term = xmemdup(data + tstr->start, tstr->end - tstr->start);
@@ -173,6 +178,9 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
 			break;
 		case YOMI_ERROR_INVAL: /* FALLTHROUGH */
 		case YOMI_ERROR_MALFO:
+			fprintf(stderr, "yomi_parse: %s\n",
+			        r == YOMI_ERROR_INVAL? "YOMI_ERROR_INVAL"
+			        : "YOMI_ERROR_MALFO");
 			free(ents);
 			ents = NULL;
 			goto cleanup;
@@ -222,8 +230,10 @@ make_dict(struct Dict *dict, size_t *nents)
 	nbanks--;
 
 	closedir(dir);
-	if (nbanks == 0)
+	if (nbanks == 0) {
+		fputs("nbanks == 0\n", stderr);
 		return NULL;
+	}
 
 	for (i = 1; i <= nbanks; i++) {
 		snprintf(tbank, LEN(tbank), "%s/term_bank_%d.json", path, (int)i);
