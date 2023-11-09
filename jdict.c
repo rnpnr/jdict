@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <stddef.h>
+#include <stdint.h> /* for SIZE_MAX */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,6 +16,7 @@
 
 #include "config.h"
 
+#define YOMI_STRIDE_GUESS 10000UL
 #define YOMI_TOKS_PER_ENT 10
 #define YOMI_TOK_DELTA (YOMI_TOKS_PER_ENT * 100)
 
@@ -96,6 +98,27 @@ dedup(DictEnt *ents, size_t *nents)
 	return xreallocarray(dents, *nents, sizeof(DictEnt));
 }
 
+static size_t
+count_term_banks(const char *path)
+{
+	DIR *dir;
+	struct dirent *dent;
+	size_t nbanks = 0;
+
+	if (!(dir = opendir(path)))
+		die("opendir(): failed to open: %s\n", path);
+
+	/* count term banks in path */
+	while ((dent = readdir(dir)) != NULL)
+		if (dent->d_type == DT_REG)
+			nbanks++;
+	/* remove index.json from count */
+	nbanks--;
+
+	closedir(dir);
+	return nbanks;
+}
+
 /* takes a token of type YOMI_ENTRY and creates a DictEnt */
 static DictEnt *
 make_ent(YomiTok *toks, char *data)
@@ -140,15 +163,18 @@ make_ent(YomiTok *toks, char *data)
 	return d;
 }
 
-static DictEnt *
-parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
+static size_t
+parse_term_bank(DictEnt *ents, size_t len, const char *tbank)
 {
 	int r, ntoks, fd;
-	size_t i, flen;
+	size_t flen, i = 0, nents = 0;
 	char *data;
 	YomiTok *toks = NULL;
 	YomiScanner *s = NULL;
 	DictEnt *e;
+
+	if (len == 0)
+		return 0;
 
 	if ((fd = open(tbank, O_RDONLY)) < 0)
 		die("can't open file: %s\n", tbank);
@@ -160,46 +186,33 @@ parse_term_bank(DictEnt *ents, size_t *nents, const char *tbank, size_t *stride)
 		die("couldn't mmap file: %s\n", tbank);
 
 	/* allocate tokens */
-	ntoks = *stride * YOMI_TOKS_PER_ENT + 1;
-	if ((ntoks - 1) / YOMI_TOKS_PER_ENT != *stride)
-		die("stride multiplication overflowed: %s\n", tbank);
+	if ((SIZE_MAX - 1) / YOMI_TOKS_PER_ENT < len)
+		die("ntoks multiplication overflowed: %s\n", tbank);
+	ntoks = len * YOMI_TOKS_PER_ENT + 1;
 	toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
 
 	s = yomi_scanner_new(data, flen);
 	while ((r = yomi_scan(s, toks, ntoks)) < 0) {
 		switch (r) {
 		case YOMI_ERROR_NOMEM:
-			/* allocate more mem and try again */
-			if (ntoks + YOMI_TOK_DELTA < 0)
-				die("too many toks: %s\n", tbank);
-			ntoks += YOMI_TOK_DELTA;
-			toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
-			*stride = ntoks/YOMI_TOKS_PER_ENT;
-			break;
-		case YOMI_ERROR_INVAL: /* FALLTHROUGH */
+			goto cleanup;
+		case YOMI_ERROR_INVAL:
 		case YOMI_ERROR_MALFO:
 			fprintf(stderr, "yomi_parse: %s\n",
 			        r == YOMI_ERROR_INVAL? "YOMI_ERROR_INVAL"
 			        : "YOMI_ERROR_MALFO");
-			free(ents);
-			ents = NULL;
 			goto cleanup;
 		}
 	}
 
-	ents = xreallocarray(ents, (*nents) + r/YOMI_TOKS_PER_ENT, sizeof(DictEnt));
 	for (i = 0; i < r; i++) {
 		if (toks[i].type != YOMI_ENTRY)
 			continue;
 
 		e = make_ent(&toks[i], data);
-		if (e != NULL) {
-			memcpy(&ents[(*nents)++], e, sizeof(DictEnt));
-		} else {
-			free(ents);
-			ents = NULL;
+		if (e == NULL)
 			break;
-		}
+		memcpy(&ents[nents++], e, sizeof(DictEnt));
 	}
 
 cleanup:
@@ -207,43 +220,49 @@ cleanup:
 	free(toks);
 	free(s);
 
-	return ents;
+	return nents;
 }
 
 static DictEnt *
-make_dict(struct Dict *dict, size_t *nents)
+make_dict(struct Dict *dict, size_t *nlen)
 {
 	char path[PATH_MAX - 20], tbank[PATH_MAX];
-	size_t i, nbanks = 0;
-	DIR *dir;
-	struct dirent *dent;
+	size_t i, nbanks, nents = 0, lents = 0;
 	DictEnt *ents = NULL;
 
 	snprintf(path, LEN(path), "%s/%s", prefix, dict->rom);
-	if (!(dir = opendir(path)))
-		die("opendir(): failed to open: %s\n", path);
 
-	/* count term banks in path */
-	while ((dent = readdir(dir)) != NULL)
-		if (dent->d_type == DT_REG)
-			nbanks++;
-	/* remove index.json from count */
-	nbanks--;
-
-	closedir(dir);
-	if (nbanks == 0) {
-		fputs("nbanks == 0\n", stderr);
+	if ((nbanks = count_term_banks(path)) == 0)  {
+		fprintf(stderr, "no term banks found: %s\n", path);
 		return NULL;
 	}
 
-	for (i = 1; i <= nbanks; i++) {
+	/* parse first bank to get a guess for the total number of entries */
+	snprintf(tbank, LEN(tbank), "%s/term_bank_%d.json", path, 1);
+	do {
+		lents += YOMI_STRIDE_GUESS;
+		ents = xreallocarray(ents, lents, sizeof(DictEnt));
+		nents = parse_term_bank(ents, lents, tbank);
+	} while (nents == 0);
+
+	/* alloc enough memory for all ents */
+	if (SIZE_MAX / nbanks < nents)
+		die("dict has too many entries: %s\n", dict->rom);
+	lents = nents * nbanks;
+	ents = xreallocarray(ents, lents, sizeof(DictEnt));
+
+	for (i = 2; i <= nbanks; i++) {
+		size_t rem = lents - nents;
 		snprintf(tbank, LEN(tbank), "%s/term_bank_%d.json", path, (int)i);
-		ents = parse_term_bank(ents, nents, tbank, &dict->stride);
-		if (ents == NULL)
+		nents += parse_term_bank(&ents[nents], rem, tbank);
+		if (lents - nents == rem) {
+			free(ents);
 			return NULL;
+		}
 	}
-	qsort(ents, *nents, sizeof(DictEnt), entcmp);
-	ents = dedup(ents, nents);
+	qsort(ents, nents, sizeof(DictEnt), entcmp);
+	ents = dedup(ents, &nents);
+	*nlen = nents;
 
 	return ents;
 }

@@ -11,9 +11,9 @@ static char *repl_quit = "\n\033[36m(=^ᆺ^)ﾉ　バイバイ～\033[0m";
 static struct Dict {
 	const char *rom;
 	const char *name;
-	size_t stride;
 } default_dict_map[] = {
-	{"daijirin", "【三省堂　スーパー大辞林】", 10000},
-	{"daijisen", "【大辞泉】", 10000},
-	{"koujien", "【広辞苑】", 10000},
+	/* folder name      display name */
+	{"daijirin",      "【三省堂　スーパー大辞林】"},
+	{"daijisen",      "【大辞泉】"},
+	{"koujien",       "【広辞苑】"},
 };
