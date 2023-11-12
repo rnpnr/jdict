@@ -2,6 +2,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h> /* for SIZE_MAX */
 #include <stdio.h>
@@ -29,6 +30,13 @@ typedef struct {
 	size_t ndefs;
 } DictEnt;
 
+struct par_thread_arg {
+	DictEnt *ents;
+	size_t len, nents;
+	const char *pre;
+	int start, end;
+};
+
 char *argv0;
 
 static void
@@ -55,6 +63,13 @@ static int
 entcmp(const void *va, const void *vb)
 {
 	const DictEnt *a = va, *b = vb;
+	if (a->term == NULL || b->term == NULL) {
+		if (a->term == NULL && b->term)
+			return -1;
+		else if (a->term && b->term == NULL)
+			return 1;
+		return 0;
+	}
 	return strcmp(a->term, b->term);
 }
 
@@ -62,6 +77,9 @@ static void
 merge_ents(DictEnt *a, DictEnt *b)
 {
 	size_t i, nlen = a->ndefs + b->ndefs;
+
+	if (nlen == 0)
+		return;
 
 	a->defs = xreallocarray(a->defs, nlen, sizeof(char *));
 
@@ -223,11 +241,67 @@ cleanup:
 	return nents;
 }
 
+static void *
+parser_thread(void *arg)
+{
+	struct par_thread_arg *a = arg;
+	char tbank[PATH_MAX];
+	int i;
+
+	a->nents = 0;
+	for (i = a->start; i <= a->end; i++) {
+		size_t rem = a->len - a->nents;
+		snprintf(tbank, LEN(tbank), "%s/term_bank_%d.json", a->pre, i);
+		a->nents += parse_term_bank(&a->ents[a->nents], rem, tbank);
+	}
+
+	/* ensure extra memory is in a predictable state */
+	memset(&a->ents[a->nents], 0, (a->len - a->nents) * sizeof(DictEnt));
+
+	return NULL;
+}
+
+static size_t
+parallel_parse_term_banks(DictEnt *ents, size_t len, const char *pre,
+                          size_t nbanks, size_t bank_start)
+{
+	pthread_t th[NTHREADS];
+	struct par_thread_arg args[NTHREADS];
+	size_t nents = 0;
+	size_t split = (nbanks - bank_start + 1) / NTHREADS;
+	size_t extras = (nbanks - bank_start + 1) % NTHREADS;
+	int i;
+
+	/* spawn threads */
+	for (i = 0; i < NTHREADS; i++) {
+		args[i].pre = pre;
+		args[i].len = len/NTHREADS;
+		args[i].ents = &ents[i * len/NTHREADS];
+		args[i].start = i? args[i-1].end + 1 : bank_start;
+		args[i].end = args[i].start + split - 1;
+
+		/* evenly distribute remaining banks */
+		if (extras) {
+			extras--;
+			args[i].end++;
+		}
+
+		pthread_create(&th[i], 0, parser_thread, &args[i]);
+	}
+
+	/* wait for threads to exit and count entries */
+	for (i = 0; i < NTHREADS; i++) {
+		pthread_join(th[i], NULL);
+		nents += args[i].nents;
+	}
+	return nents;
+}
+
 static DictEnt *
 make_dict(struct Dict *dict, size_t *nlen)
 {
 	char path[PATH_MAX - 20], tbank[PATH_MAX];
-	size_t i, nbanks, nents = 0, lents = 0;
+	size_t nbanks, nents = 0, lents = 0;
 	DictEnt *ents = NULL;
 
 	snprintf(path, LEN(path), "%s/%s", prefix, dict->rom);
@@ -251,15 +325,9 @@ make_dict(struct Dict *dict, size_t *nlen)
 	lents = nents * nbanks;
 	ents = xreallocarray(ents, lents, sizeof(DictEnt));
 
-	for (i = 2; i <= nbanks; i++) {
-		size_t rem = lents - nents;
-		snprintf(tbank, LEN(tbank), "%s/term_bank_%d.json", path, (int)i);
-		nents += parse_term_bank(&ents[nents], rem, tbank);
-		if (lents - nents == rem) {
-			free(ents);
-			return NULL;
-		}
-	}
+	nents += parallel_parse_term_banks(&ents[nents], lents - nents,
+	                                   path, nbanks, 2);
+
 	qsort(ents, nents, sizeof(DictEnt), entcmp);
 	ents = dedup(ents, &nents);
 	*nlen = nents;

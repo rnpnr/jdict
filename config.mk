@@ -2,5 +2,5 @@
 PREFIX = /usr/local
 
 CPPFLAGS = -D_BSD_SOURCE
-CFLAGS = -O2 -std=c99 -Wall -pedantic
+CFLAGS = -O3 -std=c99 -Wall -Wextra -pedantic -pthread
 LDFLAGS = -s -static

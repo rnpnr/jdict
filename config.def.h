@@ -1,5 +1,8 @@
 /* See LICENSE for license details. */
 
+/* number of threads to use for scanning dictionaries */
+#define NTHREADS 4
+
 /* dir where unzipped yomidicts are stored */
 static char *prefix = "/usr/share/yomidicts";
 
