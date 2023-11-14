@@ -4,7 +4,6 @@
 #include <limits.h>
 #include <pthread.h>
 #include <stddef.h>
-#include <stdint.h> /* for SIZE_MAX */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -204,7 +203,7 @@ parse_term_bank(DictEnt *ents, size_t len, const char *tbank)
 		die("couldn't mmap file: %s\n", tbank);
 
 	/* allocate tokens */
-	if ((SIZE_MAX - 1) / YOMI_TOKS_PER_ENT < len)
+	if (((size_t)-1 - 1) / YOMI_TOKS_PER_ENT < len)
 		die("ntoks multiplication overflowed: %s\n", tbank);
 	ntoks = len * YOMI_TOKS_PER_ENT + 1;
 	toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
@@ -320,7 +319,7 @@ make_dict(struct Dict *dict, size_t *nlen)
 	} while (nents == 0);
 
 	/* alloc enough memory for all ents */
-	if (SIZE_MAX / nbanks < nents)
+	if ((size_t)-1 / nbanks < nents)
 		die("dict has too many entries: %s\n", dict->rom);
 	lents = nents * nbanks;
 	ents = xreallocarray(ents, lents, sizeof(DictEnt));
