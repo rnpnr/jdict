@@ -145,7 +145,7 @@ yomi_scan(YomiScanner *s, YomiTok *toks, ul ntoks)
 
 			tok = &toks[s->parent];
 			for (;;) {
-				if (tok->start != -1 && tok->end == -1) {
+				if (tok->start != (ul)-1 && tok->end == (ul)-1) {
 					/* inside unfinished tok */
 					tok->end = s->pos + 1;
 					s->parent = tok->parent;

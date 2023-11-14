@@ -184,8 +184,8 @@ make_ent(YomiTok *toks, char *data)
 static size_t
 parse_term_bank(DictEnt *ents, size_t len, const char *tbank)
 {
-	int r, ntoks, fd;
-	size_t flen, i = 0, nents = 0;
+	int i = 0, r, ntoks, fd;
+	size_t flen, nents = 0;
 	char *data;
 	YomiTok *toks = NULL;
 	YomiScanner *s = NULL;
@@ -445,8 +445,8 @@ main(int argc, char *argv[])
 {
 	char **terms = NULL, *t;
 	struct Dict *dicts = NULL;
-	size_t ndicts = 0, nterms = 0;
-	int i, iflag = 0;
+	size_t i, ndicts = 0, nterms = 0;
+	int iflag = 0;
 
 	argv0 = argv[0];
 
