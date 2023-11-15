@@ -14,8 +14,6 @@
 #include "util.h"
 #include "yomidict.h"
 
-#include "config.h"
-
 #define YOMI_STRIDE_GUESS 10000UL
 #define YOMI_TOKS_PER_ENT 10
 #define YOMI_TOK_DELTA (YOMI_TOKS_PER_ENT * 100)
@@ -29,12 +27,21 @@ typedef struct {
 	size_t ndefs;
 } DictEnt;
 
+typedef struct {
+	const char *rom;
+	const char *name;
+	DictEnt *ents;
+	size_t nents;
+} Dict;
+
 struct par_thread_arg {
 	DictEnt *ents;
 	size_t len, nents;
 	const char *pre;
 	int start, end;
 };
+
+#include "config.h"
 
 char *argv0;
 
@@ -87,32 +94,33 @@ merge_ents(DictEnt *a, DictEnt *b)
 	a->ndefs = nlen;
 }
 
-static DictEnt *
-dedup(DictEnt *ents, size_t *nents)
+static int
+dedup(Dict *d)
 {
 	size_t i, j, len = 0;
-	DictEnt *dents = xreallocarray(NULL, *nents, sizeof(DictEnt));
+	DictEnt *dents = xreallocarray(NULL, d->nents, sizeof(DictEnt));
 
-	for (i = 0; i < *nents - 1; i = j) {
-		for (j = i+1; j < *nents && !entcmp(&ents[i], &ents[j]); j++) {
-			merge_ents(&ents[i], &ents[j]);
+	for (i = 0; i < d->nents - 1; i = j) {
+		for (j = i+1; j < d->nents && !entcmp(&d->ents[i], &d->ents[j]); j++) {
+			merge_ents(&d->ents[i], &d->ents[j]);
 			/* don't leak memory after merging */
-			free(ents[j].term);
-			free(ents[j].defs);
+			free(d->ents[j].term);
+			free(d->ents[j].defs);
 		}
-		memcpy(&dents[len++], &ents[i], sizeof(DictEnt));
+		memcpy(&dents[len++], &d->ents[i], sizeof(DictEnt));
 	}
 	/* move last ent if it wasn't a duplicate */
-	if (i + 1 < *nents)
-		memcpy(&dents[len++], &ents[i+1], sizeof(DictEnt));
+	if (i + 1 < d->nents)
+		memcpy(&dents[len++], &d->ents[i+1], sizeof(DictEnt));
 
 	/* all entries were copied to dents so old ents can be freed.
 	 * the term and defs ptrs shouldn't be removed since they still
 	 * point to their respective data. the duplicates were freed above
 	 */
-	free(ents);
-	*nents = len;
-	return xreallocarray(dents, *nents, sizeof(DictEnt));
+	free(d->ents);
+	d->nents = len;
+	d->ents = xreallocarray(dents, d->nents, sizeof(DictEnt));
+	return 1;
 }
 
 static size_t
@@ -296,59 +304,48 @@ parallel_parse_term_banks(DictEnt *ents, size_t len, const char *pre,
 	return nents;
 }
 
-static DictEnt *
-make_dict(struct Dict *dict, size_t *nlen)
+static int
+make_dict(Dict *d)
 {
 	char path[PATH_MAX - 20], tbank[PATH_MAX];
-	size_t nbanks, nents = 0, lents = 0;
-	DictEnt *ents = NULL;
+	size_t nbanks, lents = 0;
+	d->ents = NULL;
 
-	snprintf(path, LEN(path), "%s/%s", prefix, dict->rom);
+	snprintf(path, LEN(path), "%s/%s", prefix, d->rom);
 
 	if ((nbanks = count_term_banks(path)) == 0)  {
 		fprintf(stderr, "no term banks found: %s\n", path);
-		return NULL;
+		return 0;
 	}
 
 	/* parse first bank to get a guess for the total number of entries */
 	snprintf(tbank, LEN(tbank), "%s/term_bank_%d.json", path, 1);
 	do {
 		lents += YOMI_STRIDE_GUESS;
-		ents = xreallocarray(ents, lents, sizeof(DictEnt));
-		nents = parse_term_bank(ents, lents, tbank);
-	} while (nents == 0);
+		d->ents = xreallocarray(d->ents, lents, sizeof(DictEnt));
+		d->nents = parse_term_bank(d->ents, lents, tbank);
+	} while (d->nents == 0);
 
 	/* alloc enough memory for all ents */
-	if ((size_t)-1 / nbanks < nents)
-		die("dict has too many entries: %s\n", dict->rom);
-	lents = nents * nbanks;
-	ents = xreallocarray(ents, lents, sizeof(DictEnt));
+	if ((size_t)-1 / nbanks < d->nents)
+		die("dict has too many entries: %s\n", d->rom);
+	lents = d->nents * nbanks;
+	d->ents = xreallocarray(d->ents, lents, sizeof(DictEnt));
 
-	nents += parallel_parse_term_banks(&ents[nents], lents - nents,
+	d->nents += parallel_parse_term_banks(&d->ents[d->nents], lents - d->nents,
 	                                   path, nbanks, 2);
 
-	qsort(ents, nents, sizeof(DictEnt), entcmp);
-	ents = dedup(ents, &nents);
-	*nlen = nents;
-
-	return ents;
+	qsort(d->ents, d->nents, sizeof(DictEnt), entcmp);
+	return dedup(d);
 }
 
-static DictEnt **
-make_dicts(struct Dict *dicts, size_t ndicts, size_t *nents)
+static int
+make_dicts(Dict *dicts, size_t ndicts)
 {
-	DictEnt **ents;
-	size_t i;
-
-	ents = xreallocarray(NULL, ndicts, sizeof(DictEnt *));
-
-	for (i = 0; i < ndicts; i++) {
-		ents[i] = make_dict(&dicts[i], &nents[i]);
-		if (ents[i] == NULL)
+	for (size_t i = 0; i < ndicts; i++)
+		if (!make_dict(&dicts[i]))
 			die("make_dict(%s): returned NULL\n", dicts[i].rom);
-	}
-
-	return ents;
+	return 1;
 }
 
 static DictEnt *
@@ -380,11 +377,9 @@ print_ent(DictEnt *ent)
 }
 
 static void
-find_and_print(const char *term, DictEnt *ents, size_t nents)
+find_and_print(const char *term, Dict *d)
 {
-	DictEnt *ent;
-
-	ent = find_ent(term, ents, nents);
+	DictEnt *ent = find_ent(term, d->ents, d->nents);
 	if (ent)
 		print_ent(ent);
 	else
@@ -392,13 +387,11 @@ find_and_print(const char *term, DictEnt *ents, size_t nents)
 }
 
 static void
-find_and_print_defs(struct Dict *dict, char **terms, size_t nterms)
+find_and_print_defs(Dict *dict, char **terms, size_t nterms)
 {
-	size_t i, nents = 0;
-	DictEnt *ents;
+	size_t i;
 
-	ents = *make_dicts(dict, 1, &nents);
-	if (!ents) {
+	if (!make_dict(dict)) {
 		fputs("failed to allocate dict: ", stdout);
 		puts(dict->rom);
 		return;
@@ -406,20 +399,18 @@ find_and_print_defs(struct Dict *dict, char **terms, size_t nterms)
 
 	puts(dict->name);
 	for (i = 0; i < nterms; i++)
-		find_and_print(terms[i], ents, nents);
+		find_and_print(terms[i], dict);
 
-	free_ents(ents, nents);
+	free_ents(dict->ents, dict->nents);
 }
 
 static void
-repl(struct Dict *dicts, size_t ndicts)
+repl(Dict *dicts, size_t ndicts)
 {
-	DictEnt **ents;
 	char buf[BUFLEN];
-	size_t i, *nents;
+	size_t i;
 
-	nents = xreallocarray(NULL, ndicts, sizeof(size_t));
-	ents = make_dicts(dicts, ndicts, nents);
+	make_dicts(dicts, ndicts);
 
 	for (;;) {
 		fputs(repl_prompt, stdout);
@@ -428,22 +419,20 @@ repl(struct Dict *dicts, size_t ndicts)
 			break;
 		for (i = 0; i < ndicts; i++) {
 			puts(dicts[i].name);
-			find_and_print(trim(buf), ents[i], nents[i]);
+			find_and_print(trim(buf), &dicts[i]);
 		}
 	}
 	puts(repl_quit);
 
 	for (i = 0; i < ndicts; i++)
-		free_ents(ents[i], nents[i]);
-	free(ents);
-	free(nents);
+		free_ents(dicts[i].ents, dicts[i].nents);
 }
 
 int
 main(int argc, char *argv[])
 {
 	char **terms = NULL, *t;
-	struct Dict *dicts = NULL;
+	Dict *dicts = NULL;
 	size_t i, ndicts = 0, nterms = 0;
 	int iflag = 0;
 
