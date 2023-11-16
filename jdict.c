@@ -369,21 +369,21 @@ find_ent(const char *term, DictEnt *ents, size_t nents)
 }
 
 static void
-print_ent(DictEnt *ent)
-{
-	size_t i;
-	for (i = 0; i < ent->ndefs; i++)
-		puts(fix_newlines(ent->defs[i]));
-}
-
-static void
 find_and_print(const char *term, Dict *d)
 {
 	DictEnt *ent = find_ent(term, d->ents, d->nents);
-	if (ent)
-		print_ent(ent);
-	else
-		printf("term not found: %s\n\n", term);
+	size_t i;
+
+	if (!ent)
+		return;
+
+	for (i = 0; i < ent->ndefs; i++) {
+		fputs(d->name, stdout);
+		fputs(fsep, stdout);
+		fputs(!strcmp(fsep, "\n")? unescape(ent->defs[i])
+		                         : ent->defs[i], stdout);
+		fputc('\n', stdout);
+	}
 }
 
 static void
@@ -397,7 +397,6 @@ find_and_print_defs(Dict *dict, char **terms, size_t nterms)
 		return;
 	}
 
-	puts(dict->name);
 	for (i = 0; i < nterms; i++)
 		find_and_print(terms[i], dict);
 
@@ -412,15 +411,14 @@ repl(Dict *dicts, size_t ndicts)
 
 	make_dicts(dicts, ndicts);
 
+	fsep = "\n";
 	for (;;) {
 		fputs(repl_prompt, stdout);
 		fflush(stdout);
 		if (fgets(buf, LEN(buf), stdin) == NULL)
 			break;
-		for (i = 0; i < ndicts; i++) {
-			puts(dicts[i].name);
+		for (i = 0; i < ndicts; i++)
 			find_and_print(trim(buf), &dicts[i]);
-		}
 	}
 	puts(repl_quit);
 
@@ -450,6 +448,9 @@ main(int argc, char *argv[])
 		}
 		if (dicts == NULL)
 			die("invalid dictionary name: %s\n", t);
+		break;
+	case 'F':
+		fsep = unescape(EARGF(usage()));
 		break;
 	case 'i':
 		iflag = 1;

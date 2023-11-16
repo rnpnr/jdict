@@ -1,4 +1,4 @@
-.Dd November 12, 2023
+.Dd November 16, 2023
 .Dt JDICT 1
 .
 .Sh NAME
@@ -8,6 +8,7 @@
 .Sh SYNOPSIS
 .Nm
 .Op Fl d Ar dictionary
+.Op Fl F Ar FS
 .Op Fl i
 .Ar term ...
 .
@@ -25,8 +26,12 @@ The following options are supported:
 .It Fl d Ar dictionary
 limit search to the specified
 .Ar dictionary .
+.It Fl F Ar FS
+use
+.Ar FS
+for output field separation.
 .It Fl i
-run the program in interactive mode.
+run the program in interactive mode. FS will be set to "\\n".
 .El
 .
 .Sh CUSTOMIZATION

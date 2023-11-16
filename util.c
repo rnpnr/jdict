@@ -35,16 +35,22 @@ trim(char *s)
 	return s;
 }
 
-/* replace embedded escaped newlines with actual newlines */
+/* replace escaped control chars with their actual char */
 char *
-fix_newlines(char *s)
+unescape(char *s)
 {
 	char *t = s;
+	int off;
 
-	while ((t = strstr(t, "\\n")) != NULL) {
-		t[0] = '\n';
-		t++;
-		memmove(t, t + 1, strlen(t + 1) + 1);
+	while ((t = strchr(t, '\\')) != NULL) {
+		off = 1;
+		switch (t[1]) {
+		case 'n': t[0] = '\n'; t++; break;
+		case 't': t[0] = '\t'; t++; break;
+		case 'u': t++; continue;
+		default: off++;
+		}
+		memmove(t, t + off, strlen(t + off) + 1);
 	}
 
 	return s;
