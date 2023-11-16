@@ -48,7 +48,7 @@ char *argv0;
 static void
 usage(void)
 {
-	die("usage: %s [-d path] [-i] term ...\n", argv0);
+	die("usage: %s [-d path] [-F FS] [-i] term ...\n", argv0);
 }
 
 static void
