@@ -22,8 +22,8 @@
 #define BUFLEN 256
 
 typedef struct {
-	char *term;
-	char **defs;
+	s8 term;
+	s8 *defs;
 	size_t ndefs;
 } DictEnt;
 
@@ -58,9 +58,9 @@ free_ents(DictEnt *ents, size_t nents)
 
 	for (i = 0; i < nents; i++) {
 		for (j = 0; j < ents[i].ndefs; j++)
-			free(ents[i].defs[j]);
+			free(ents[i].defs[j].s);
 		free(ents[i].defs);
-		free(ents[i].term);
+		free(ents[i].term.s);
 	}
 	free(ents);
 }
@@ -68,14 +68,7 @@ free_ents(DictEnt *ents, size_t nents)
 static int
 entcmp(DictEnt *a, DictEnt *b)
 {
-	if (a->term == NULL || b->term == NULL) {
-		if (a->term == NULL && b->term)
-			return -1;
-		else if (a->term && b->term == NULL)
-			return 1;
-		return 0;
-	}
-	return strcmp(a->term, b->term);
+	return s8cmp(a->term, b->term);
 }
 
 static void
@@ -86,7 +79,7 @@ merge_ents(DictEnt *a, DictEnt *b)
 	if (nlen == 0)
 		return;
 
-	a->defs = xreallocarray(a->defs, nlen, sizeof(char *));
+	a->defs = xreallocarray(a->defs, nlen, sizeof(s8));
 
 	for (i = 0; i < b->ndefs; i++)
 		a->defs[a->ndefs + i] = b->defs[i];
@@ -103,7 +96,7 @@ dedup(Dict *d)
 		for (j = i+1; j < d->nents && !entcmp(&d->ents[i], &d->ents[j]); j++) {
 			merge_ents(&d->ents[i], &d->ents[j]);
 			/* don't leak memory after merging */
-			free(d->ents[j].term);
+			free(d->ents[j].term.s);
 			free(d->ents[j].defs);
 		}
 		memcpy(&dents[len++], &d->ents[i], sizeof(DictEnt));
@@ -177,12 +170,12 @@ make_ent(YomiTok *toks, char *data)
 	}
 
 	d = xreallocarray(NULL, 1, sizeof(DictEnt));
-	d->term = xmemdup(data + tstr->start, tstr->end - tstr->start);
+	d->term = s8dup(data + tstr->start, tstr->end - tstr->start);
 	d->ndefs = tdefs->len;
-	d->defs = xreallocarray(NULL, d->ndefs, sizeof(char *));
+	d->defs = xreallocarray(NULL, d->ndefs, sizeof(s8));
 	for (i = 1; i <= d->ndefs; i++)
-		d->defs[i - 1] = xmemdup(data + tdefs[i].start,
-		                         tdefs[i].end - tdefs[i].start);
+		d->defs[i - 1] = s8dup(data + tdefs[i].start,
+		                       tdefs[i].end - tdefs[i].start);
 
 	return d;
 }
@@ -348,14 +341,14 @@ make_dicts(Dict *dicts, size_t ndicts)
 }
 
 static DictEnt *
-find_ent(const char *term, DictEnt *ents, size_t nents)
+find_ent(s8 term, DictEnt *ents, size_t nents)
 {
 	int r;
 
 	if (nents == 0)
 		return NULL;
 
-	r = strcmp(term, ents[nents/2].term);
+	r = s8cmp(term, ents[nents/2].term);
 	if (r == 0)
 		return &ents[nents/2];
 	if (r < 0)
@@ -368,7 +361,7 @@ find_ent(const char *term, DictEnt *ents, size_t nents)
 }
 
 static void
-find_and_print(const char *term, Dict *d)
+find_and_print(s8 term, Dict *d)
 {
 	DictEnt *ent = find_ent(term, d->ents, d->nents);
 	size_t i;
@@ -377,16 +370,17 @@ find_and_print(const char *term, Dict *d)
 		return;
 
 	for (i = 0; i < ent->ndefs; i++) {
+		if (!s8cmp(fsep, s8("\n")))
+			ent->defs[i] = unescape(ent->defs[i]);
 		fputs(d->name, stdout);
-		fputs(fsep, stdout);
-		fputs(!strcmp(fsep, "\n")? unescape(ent->defs[i])
-		                         : ent->defs[i], stdout);
+		fwrite(fsep.s, fsep.len, 1, stdout);
+		fwrite(ent->defs[i].s, ent->defs[i].len, 1, stdout);
 		fputc('\n', stdout);
 	}
 }
 
 static void
-find_and_print_defs(Dict *dict, char **terms, size_t nterms)
+find_and_print_defs(Dict *dict, s8 *terms, size_t nterms)
 {
 	size_t i;
 
@@ -405,19 +399,22 @@ find_and_print_defs(Dict *dict, char **terms, size_t nterms)
 static void
 repl(Dict *dicts, size_t ndicts)
 {
-	char buf[BUFLEN];
+	char t[BUFLEN];
+	s8 buf = {t, BUFLEN};
 	size_t i;
 
 	make_dicts(dicts, ndicts);
 
-	fsep = "\n";
+	fsep = s8("\n");
 	for (;;) {
 		fputs(repl_prompt, stdout);
 		fflush(stdout);
-		if (fgets(buf, LEN(buf), stdin) == NULL)
+		buf.len = BUFLEN;
+		if (fgets(buf.s, buf.len, stdin) == NULL)
 			break;
+		buf.len = strlen(buf.s);
 		for (i = 0; i < ndicts; i++)
-			find_and_print(trim(buf), &dicts[i]);
+			find_and_print(s8trim(buf), &dicts[i]);
 	}
 	puts(repl_quit);
 
@@ -428,7 +425,8 @@ repl(Dict *dicts, size_t ndicts)
 int
 main(int argc, char *argv[])
 {
-	char **terms = NULL, *t;
+	s8 *terms = NULL;
+	char *t;
 	Dict *dicts = NULL;
 	size_t i, ndicts = 0, nterms = 0;
 	int iflag = 0;
@@ -449,7 +447,8 @@ main(int argc, char *argv[])
 			die("invalid dictionary name: %s\n", t);
 		break;
 	case 'F':
-		fsep = unescape(EARGF(usage()));
+		t = EARGF(usage());
+		fsep = unescape((s8){t, strlen(t)});
 		break;
 	case 'i':
 		iflag = 1;
@@ -465,8 +464,9 @@ main(int argc, char *argv[])
 
 	/* remaining argv elements are terms to search for */
 	for (i = 0; argc && *argv; argv++, i++, argc--) {
-		terms = xreallocarray(terms, ++nterms, sizeof(char *));
-		terms[i] = *argv;
+		terms = xreallocarray(terms, ++nterms, sizeof(s8));
+		terms[i].s = *argv;
+		terms[i].len = strlen(terms[i].s);
 	}
 
 	if (nterms == 0 && iflag == 0)

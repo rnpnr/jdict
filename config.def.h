@@ -7,7 +7,7 @@
 static char *prefix = "/usr/share/yomidicts";
 
 /* field separator for output printing */
-static char *fsep = "\t";
+static s8 fsep = s8("\t");
 
 /* repl prompt and quit strings */
 static char *repl_prompt = "\033[32;1m入力:\033[0m ";

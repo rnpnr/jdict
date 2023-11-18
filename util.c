@@ -20,29 +20,38 @@ die(const char *fmt, ...)
 	exit(1);
 }
 
+int
+s8cmp(s8 a, s8 b)
+{
+	if (a.len == 0 || a.len != b.len)
+		return a.len - b.len;
+	return memcmp(a.s, b.s, a.len);
+}
+
 /*
  * trim whitespace from start and end of str
- * returns start of trimmed str
+ * returns a new s8 (same memory)
  */
-char *
-trim(char *s)
+s8
+s8trim(s8 str)
 {
-	char *p = &s[strlen(s)-1];
+	char *p = &str.s[str.len-1];
 
-	for (; isspace(*p); *p = 0, p--);
-	for (; *s && isspace(*s); s++);
+	for (; str.len && isspace(*p); str.len--, p--);
+	for (; str.len && isspace(*str.s); str.len--, str.s++);
 
-	return s;
+	return str;
 }
 
 /* replace escaped control chars with their actual char */
-char *
-unescape(char *s)
+s8
+unescape(s8 str)
 {
-	char *t = s;
+	char *t = str.s;
+	ptrdiff_t rem = str.len;
 	int off;
 
-	while ((t = strchr(t, '\\')) != NULL) {
+	while ((t = memchr(t, '\\', rem)) != NULL) {
 		off = 1;
 		switch (t[1]) {
 		case 'n': t[0] = '\n'; t++; break;
@@ -50,10 +59,11 @@ unescape(char *s)
 		case 'u': t++; continue;
 		default: off++;
 		}
-		memmove(t, t + off, strlen(t + off) + 1);
+		rem = str.len-- - (t - str.s) - off;
+		memmove(t, t + off, rem);
 	}
 
-	return s;
+	return str;
 }
 
 void *
@@ -67,13 +77,13 @@ xreallocarray(void *o, size_t n, size_t s)
 	return new;
 }
 
-char *
-xmemdup(void *src, ptrdiff_t len)
+s8
+s8dup(void *src, ptrdiff_t len)
 {
-	char *p;
+	s8 str = {0, len};
 	if (len < 0)
-		die("xmemdup(): negative len\n");
-	p = xreallocarray(NULL, 1, len + 1);
-	p[len] = 0;
-	return memcpy(p, src, len);
+		die("s8dup(): negative len\n");
+	str.s = xreallocarray(NULL, 1, len);
+	memcpy(str.s, src, len);
+	return str;
 }
