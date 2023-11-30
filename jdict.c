@@ -66,9 +66,8 @@ free_ents(DictEnt *ents, size_t nents)
 }
 
 static int
-entcmp(const void *va, const void *vb)
+entcmp(DictEnt *a, DictEnt *b)
 {
-	const DictEnt *a = va, *b = vb;
 	if (a->term == NULL || b->term == NULL) {
 		if (a->term == NULL && b->term)
 			return -1;
@@ -335,7 +334,7 @@ make_dict(Dict *d)
 	d->nents += parallel_parse_term_banks(&d->ents[d->nents], lents - d->nents,
 	                                   path, nbanks, 2);
 
-	qsort(d->ents, d->nents, sizeof(DictEnt), entcmp);
+	qsort(d->ents, d->nents, sizeof(DictEnt), (int (*)(const void *, const void *))entcmp);
 	return dedup(d);
 }
 
