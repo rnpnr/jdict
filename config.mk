@@ -3,5 +3,5 @@ PREFIX = /usr/local
 MANPREFIX = $(PREFIX)/share/man
 
 CPPFLAGS = -D_BSD_SOURCE
-CFLAGS = -O3 -std=c99 -Wall -Wextra -pedantic -pthread
+CFLAGS = -O3 -std=c99 -Wall -Wextra -pedantic
 LDFLAGS = -s -static

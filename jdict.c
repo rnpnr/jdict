@@ -2,8 +2,8 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
-#include <pthread.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,12 +14,17 @@
 #include "util.h"
 #include "yomidict.h"
 
-#define YOMI_STRIDE_GUESS 10000UL
 #define YOMI_TOKS_PER_ENT 10
-#define YOMI_TOK_DELTA (YOMI_TOKS_PER_ENT * 100)
 
 /* buffer length for interactive mode */
 #define BUFLEN 256
+
+/* Number of hash table slots (1 << HT_EXP) */
+#define HT_EXP 20
+
+typedef uint64_t u64;
+typedef uint32_t u32;
+typedef int32_t  i32;
 
 typedef struct {
 	s8 term;
@@ -27,19 +32,16 @@ typedef struct {
 	size_t ndefs;
 } DictEnt;
 
+struct ht {
+	DictEnt **ents;
+	i32 len;
+};
+
 typedef struct {
 	const char *rom;
 	const char *name;
-	DictEnt *ents;
-	size_t nents;
+	struct ht ht;
 } Dict;
-
-struct par_thread_arg {
-	DictEnt *ents;
-	size_t len, nents;
-	const char *pre;
-	int start, end;
-};
 
 #include "config.h"
 
@@ -49,26 +51,6 @@ static void
 usage(void)
 {
 	die("usage: %s [-d path] [-F FS] [-i] term ...\n", argv0);
-}
-
-static void
-free_ents(DictEnt *ents, size_t nents)
-{
-	size_t i, j;
-
-	for (i = 0; i < nents; i++) {
-		for (j = 0; j < ents[i].ndefs; j++)
-			free(ents[i].defs[j].s);
-		free(ents[i].defs);
-		free(ents[i].term.s);
-	}
-	free(ents);
-}
-
-static int
-entcmp(DictEnt *a, DictEnt *b)
-{
-	return s8cmp(a->term, b->term);
 }
 
 static void
@@ -86,33 +68,48 @@ merge_ents(DictEnt *a, DictEnt *b)
 	a->ndefs = nlen;
 }
 
-static int
-dedup(Dict *d)
+/* FNV-1a hash */
+static u64
+hash(s8 v)
 {
-	size_t i, j, len = 0;
-	DictEnt *dents = xreallocarray(NULL, d->nents, sizeof(DictEnt));
-
-	for (i = 0; i < d->nents - 1; i = j) {
-		for (j = i+1; j < d->nents && !entcmp(&d->ents[i], &d->ents[j]); j++) {
-			merge_ents(&d->ents[i], &d->ents[j]);
-			/* don't leak memory after merging */
-			free(d->ents[j].term.s);
-			free(d->ents[j].defs);
-		}
-		memcpy(&dents[len++], &d->ents[i], sizeof(DictEnt));
+	u64 h = 0x3243f6a8885a308d; /* digits of pi */
+	for (; v.len; v.len--) {
+		h ^= v.s[v.len - 1] & 0xFF;
+		h *= 1111111111111111111; /* random prime */
 	}
-	/* move last ent if it wasn't a duplicate */
-	if (i + 1 < d->nents)
-		memcpy(&dents[len++], &d->ents[i+1], sizeof(DictEnt));
+	return h;
+}
 
-	/* all entries were copied to dents so old ents can be freed.
-	 * the term and defs ptrs shouldn't be removed since they still
-	 * point to their respective data. the duplicates were freed above
-	 */
-	free(d->ents);
-	d->nents = len;
-	d->ents = xreallocarray(dents, d->nents, sizeof(DictEnt));
-	return 1;
+static i32
+ht_lookup(u64 hash, int exp, i32 idx)
+{
+	u32 mask = ((u32)1 << exp) - 1;
+	u32 step = (hash >> (64 - exp)) | 1;
+	return (idx + step) & mask;
+}
+
+static DictEnt *
+intern(struct ht *t, DictEnt *e)
+{
+	s8 key = e->term;
+	u64 h = hash(key);
+	i32 i = h;
+	for (;;) {
+		i = ht_lookup(h, HT_EXP, i);
+		if (!t->ents[i]) {
+			/* empty slot */
+			if ((u32)t->len + 1 == (u32)1<<(HT_EXP - 1)) {
+				fputs("intern: ht exceeded 0.5 fill factor\n", stderr);
+				return NULL;
+			}
+			t->len++;
+			t->ents[i] = e;
+			return e;
+		} else if (!s8cmp(t->ents[i]->term, e->term)) {
+			/* found; return the stored instance */
+			return t->ents[i];
+		}
+	}
 }
 
 static size_t
@@ -180,18 +177,15 @@ make_ent(YomiTok *toks, char *data)
 	return d;
 }
 
-static size_t
-parse_term_bank(DictEnt *ents, size_t len, const char *tbank)
+static void
+parse_term_bank(struct ht *ht, const char *tbank)
 {
 	int i = 0, r, ntoks, fd;
-	size_t flen, nents = 0;
+	size_t flen;
 	char *data;
 	YomiTok *toks = NULL;
 	YomiScanner *s = NULL;
-	DictEnt *e;
-
-	if (len == 0)
-		return 0;
+	DictEnt *e, *n;
 
 	if ((fd = open(tbank, O_RDONLY)) < 0)
 		die("can't open file: %s\n", tbank);
@@ -203,9 +197,7 @@ parse_term_bank(DictEnt *ents, size_t len, const char *tbank)
 		die("couldn't mmap file: %s\n", tbank);
 
 	/* allocate tokens */
-	if (((size_t)-1 - 1) / YOMI_TOKS_PER_ENT < len)
-		die("ntoks multiplication overflowed: %s\n", tbank);
-	ntoks = len * YOMI_TOKS_PER_ENT + 1;
+	ntoks = (1 << HT_EXP) * YOMI_TOKS_PER_ENT + 1;
 	toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
 
 	s = yomi_scanner_new(data, flen);
@@ -226,147 +218,77 @@ parse_term_bank(DictEnt *ents, size_t len, const char *tbank)
 		if (toks[i].type != YOMI_ENTRY)
 			continue;
 
-		e = make_ent(&toks[i], data);
-		if (e == NULL)
+		if ((e = make_ent(&toks[i], data)) == NULL)
 			break;
-		memcpy(&ents[nents++], e, sizeof(DictEnt));
+		if ((n = intern(ht, e)) == NULL)
+			break;
+		if (n == e)
+			continue;
+		/* hash table entry already exists, append new defs */
+		if (s8cmp(n->term, e->term)) {
+			fputs("hash collision: ", stderr);
+			fwrite(e->term.s, e->term.len, 1, stderr);
+			fputc('\t', stderr);
+			fwrite(n->term.s, n->term.len, 1, stderr);
+			fputc('\n', stderr);
+		}
+		merge_ents(n, e);
+		free(e->term.s);
+		free(e->defs);
+		free(e);
 	}
 
 cleanup:
 	munmap(data, flen);
 	free(toks);
 	free(s);
-
-	return nents;
-}
-
-static void *
-parser_thread(void *arg)
-{
-	struct par_thread_arg *a = arg;
-	char tbank[PATH_MAX];
-	int i;
-
-	a->nents = 0;
-	for (i = a->start; i <= a->end; i++) {
-		size_t rem = a->len - a->nents;
-		snprintf(tbank, LEN(tbank), "%s/term_bank_%d.json", a->pre, i);
-		a->nents += parse_term_bank(&a->ents[a->nents], rem, tbank);
-	}
-
-	/* ensure extra memory is in a predictable state */
-	memset(&a->ents[a->nents], 0, (a->len - a->nents) * sizeof(DictEnt));
-
-	return NULL;
-}
-
-static size_t
-parallel_parse_term_banks(DictEnt *ents, size_t len, const char *pre,
-                          size_t nbanks, size_t bank_start)
-{
-	pthread_t th[NTHREADS];
-	struct par_thread_arg args[NTHREADS];
-	size_t nents = 0;
-	size_t split = (nbanks - bank_start + 1) / NTHREADS;
-	size_t extras = (nbanks - bank_start + 1) % NTHREADS;
-	int i;
-
-	/* spawn threads */
-	for (i = 0; i < NTHREADS; i++) {
-		args[i].pre = pre;
-		args[i].len = len/NTHREADS;
-		args[i].ents = &ents[i * len/NTHREADS];
-		args[i].start = i? args[i-1].end + 1 : bank_start;
-		args[i].end = args[i].start + split - 1;
-
-		/* evenly distribute remaining banks */
-		if (extras) {
-			extras--;
-			args[i].end++;
-		}
-
-		pthread_create(&th[i], 0, parser_thread, &args[i]);
-	}
-
-	/* wait for threads to exit and count entries */
-	for (i = 0; i < NTHREADS; i++) {
-		pthread_join(th[i], NULL);
-		nents += args[i].nents;
-	}
-	return nents;
 }
 
 static int
 make_dict(Dict *d)
 {
 	char path[PATH_MAX - 20], tbank[PATH_MAX];
-	size_t nbanks, lents = 0;
-	d->ents = NULL;
+	size_t nbanks;
+
+	d->ht.ents = xreallocarray(NULL, sizeof(DictEnt *), 1 << HT_EXP);
 
 	snprintf(path, LEN(path), "%s/%s", prefix, d->rom);
-
-	if ((nbanks = count_term_banks(path)) == 0)  {
+	if ((nbanks = count_term_banks(path)) == 0) {
 		fprintf(stderr, "no term banks found: %s\n", path);
 		return 0;
 	}
 
-	/* parse first bank to get a guess for the total number of entries */
-	snprintf(tbank, LEN(tbank), "%s/term_bank_%d.json", path, 1);
-	do {
-		lents += YOMI_STRIDE_GUESS;
-		d->ents = xreallocarray(d->ents, lents, sizeof(DictEnt));
-		d->nents = parse_term_bank(d->ents, lents, tbank);
-	} while (d->nents == 0);
+	for (size_t i = 1; i <= nbanks; i++) {
+		snprintf(tbank, LEN(tbank), "%s/term_bank_%zu.json", path, i);
+		parse_term_bank(&d->ht, tbank);
+	}
 
-	/* alloc enough memory for all ents */
-	if ((size_t)-1 / nbanks < d->nents)
-		die("dict has too many entries: %s\n", d->rom);
-	lents = d->nents * nbanks;
-	d->ents = xreallocarray(d->ents, lents, sizeof(DictEnt));
-
-	d->nents += parallel_parse_term_banks(&d->ents[d->nents], lents - d->nents,
-	                                   path, nbanks, 2);
-
-	qsort(d->ents, d->nents, sizeof(DictEnt), (int (*)(const void *, const void *))entcmp);
-	return dedup(d);
+	return 1;
 }
 
-static int
+static void
 make_dicts(Dict *dicts, size_t ndicts)
 {
 	for (size_t i = 0; i < ndicts; i++)
 		if (!make_dict(&dicts[i]))
 			die("make_dict(%s): returned NULL\n", dicts[i].rom);
-	return 1;
 }
 
 static DictEnt *
-find_ent(s8 term, DictEnt *ents, size_t nents)
+find_ent(s8 term, Dict *d)
 {
-	int r;
-
-	if (nents == 0)
-		return NULL;
-
-	r = s8cmp(term, ents[nents/2].term);
-	if (r == 0)
-		return &ents[nents/2];
-	if (r < 0)
-		return find_ent(term, ents, nents/2);
-
-	if (nents % 2)
-		return find_ent(term, &ents[nents/2 + 1], nents/2);
-
-	return find_ent(term, &ents[nents/2 + 1], nents/2 - 1);
+	u64 h = hash(term);
+	i32 i = ht_lookup(h, HT_EXP, (i32)h);
+	return d->ht.ents[i];
 }
 
 static void
 find_and_print(s8 term, Dict *d)
 {
-	DictEnt *ent = find_ent(term, d->ents, d->nents);
+	DictEnt *ent = find_ent(term, d);
 	size_t i;
 
-	if (!ent)
+	if (!ent || s8cmp(term, ent->term))
 		return;
 
 	for (i = 0; i < ent->ndefs; i++) {
@@ -392,8 +314,6 @@ find_and_print_defs(Dict *dict, s8 *terms, size_t nterms)
 
 	for (i = 0; i < nterms; i++)
 		find_and_print(terms[i], dict);
-
-	free_ents(dict->ents, dict->nents);
 }
 
 static void
@@ -417,9 +337,6 @@ repl(Dict *dicts, size_t ndicts)
 			find_and_print(s8trim(buf), &dicts[i]);
 	}
 	puts(repl_quit);
-
-	for (i = 0; i < ndicts; i++)
-		free_ents(dicts[i].ents, dicts[i].nents);
 }
 
 int
