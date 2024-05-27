@@ -8,31 +8,48 @@
 #include <stddef.h>
 #include <stdlib.h>
 
-#include "util.h"
-#include "yomidict.h"
-
 #define ul unsigned long
 
 #define ISDIGIT(c) ((c) >= '0' && (c) <= '9')
 
-struct YomiScanner {
+typedef enum {
+	YOMI_UNDEF = 0,
+	YOMI_ENTRY = 1,
+	YOMI_ARRAY = 2,
+	YOMI_STR = 4,
+	YOMI_NUM = 8
+} YomiType;
+
+typedef struct {
+	unsigned long start;
+	unsigned long end;
+	unsigned long len;
+	int parent; /* parent tok number */
+	YomiType type;
+} YomiTok;
+
+typedef struct {
 	const char *data;
 	ul len;
 	ul pos; /* offset in yomi bank */
 	ul toknext;
 	int parent; /* parent tok of current element */
+} YomiScanner;
+
+enum {
+	YOMI_ERROR_NOMEM = -1,
+	YOMI_ERROR_INVAL = -2,
+	YOMI_ERROR_MALFO = -3
 };
 
-YomiScanner *
-yomi_scanner_new(const char *data, unsigned long datalen)
+static void
+yomi_scanner_init(YomiScanner *s, const char *data, ul datalen)
 {
-	YomiScanner *s = xreallocarray(NULL, sizeof(YomiScanner), 1);
 	s->data = data;
 	s->len = datalen;
 	s->pos = 0;
 	s->toknext = 0;
 	s->parent = -1;
-	return s;
 }
 
 static YomiTok *
@@ -109,7 +126,7 @@ number(YomiScanner *s, YomiTok *t)
 	return YOMI_ERROR_MALFO;
 }
 
-int
+static int
 yomi_scan(YomiScanner *s, YomiTok *toks, ul ntoks)
 {
 	YomiTok *tok;

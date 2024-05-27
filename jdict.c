@@ -11,8 +11,8 @@
 #include <unistd.h>
 
 #include "arg.h"
-#include "util.h"
-#include "yomidict.h"
+#include "util.c"
+#include "yomidict.c"
 
 #define YOMI_TOKS_PER_ENT 10
 
@@ -184,7 +184,7 @@ parse_term_bank(struct ht *ht, const char *tbank)
 	size_t flen;
 	char *data;
 	YomiTok *toks = NULL;
-	YomiScanner *s = NULL;
+	YomiScanner s = {0};
 	DictEnt *e, *n;
 
 	if ((fd = open(tbank, O_RDONLY)) < 0)
@@ -200,8 +200,8 @@ parse_term_bank(struct ht *ht, const char *tbank)
 	ntoks = (1 << HT_EXP) * YOMI_TOKS_PER_ENT + 1;
 	toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
 
-	s = yomi_scanner_new(data, flen);
-	while ((r = yomi_scan(s, toks, ntoks)) < 0) {
+	yomi_scanner_init(&s, data, flen);
+	while ((r = yomi_scan(&s, toks, ntoks)) < 0) {
 		switch (r) {
 		case YOMI_ERROR_NOMEM:
 			goto cleanup;
@@ -241,7 +241,6 @@ parse_term_bank(struct ht *ht, const char *tbank)
 cleanup:
 	munmap(data, flen);
 	free(toks);
-	free(s);
 }
 
 static int

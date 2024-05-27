@@ -24,11 +24,12 @@ zip file created by `yomichan-import` needs to be extracted and
 stored in the prefix specified in `config.h`. The folder name should
 be also specified in `config.h`.
 
-After modifying `config.h`, `config.mk` can also be modified to suit
-your system and then the following can be used to install (using root
-as needed):
+To build:
+	./build.sh
 
-	make clean install
+To install:
+	cp ./jdict ~/bin/
+	cp ./jdict.1 ~/.local/share/man/man1/
 
 [Yomichan]: https://github.com/FooSoft/yomichan
 [yomichan-import]: https://github.com/FooSoft/yomichan-import/

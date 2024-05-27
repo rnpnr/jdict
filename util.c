@@ -6,9 +6,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "util.h"
+#define LEN(a) (sizeof(a) / sizeof(*a))
 
-void
+typedef struct {
+	char *s;
+	ptrdiff_t len;
+} s8;
+#define s8(s) (s8){s, LEN(s) - 1}
+
+static void __attribute__((noreturn))
 die(const char *fmt, ...)
 {
 	va_list ap;
@@ -20,7 +26,7 @@ die(const char *fmt, ...)
 	exit(1);
 }
 
-int
+static int
 s8cmp(s8 a, s8 b)
 {
 	if (a.len == 0 || a.len != b.len)
@@ -32,7 +38,7 @@ s8cmp(s8 a, s8 b)
  * trim whitespace from start and end of str
  * returns a new s8 (same memory)
  */
-s8
+static s8
 s8trim(s8 str)
 {
 	char *p = &str.s[str.len-1];
@@ -44,7 +50,7 @@ s8trim(s8 str)
 }
 
 /* replace escaped control chars with their actual char */
-s8
+static s8
 unescape(s8 str)
 {
 	char *t = str.s;
@@ -66,7 +72,7 @@ unescape(s8 str)
 	return str;
 }
 
-void *
+static void *
 xreallocarray(void *o, size_t n, size_t s)
 {
 	void *new;
@@ -77,7 +83,7 @@ xreallocarray(void *o, size_t n, size_t s)
 	return new;
 }
 
-s8
+static s8
 s8dup(void *src, ptrdiff_t len)
 {
 	s8 str = {0, len};
