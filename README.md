@@ -25,9 +25,11 @@ stored in the prefix specified in `config.h`. The folder name should
 be also specified in `config.h`.
 
 To build:
+
 	./build.sh
 
 To install:
+
 	cp ./jdict ~/bin/
 	cp ./jdict.1 ~/.local/share/man/man1/
 
