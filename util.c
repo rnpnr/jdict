@@ -6,13 +6,22 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define LEN(a) (sizeof(a) / sizeof(*a))
+#include <stdint.h>
+#include <stddef.h>
+typedef uint8_t   u8;
+typedef int64_t   i64;
+typedef uint64_t  u64;
+typedef int32_t   i32;
+typedef uint32_t  u32;
+typedef ptrdiff_t size;
+
+#define ARRAY_COUNT(a) (sizeof(a) / sizeof(*a))
 
 typedef struct {
-	char *s;
-	ptrdiff_t len;
+	size len;
+	u8   *s;
 } s8;
-#define s8(s) (s8){s, LEN(s) - 1}
+#define s8(cstr) (s8){.len = ARRAY_COUNT(cstr) - 1, .s = (u8 *)cstr}
 
 static void __attribute__((noreturn))
 die(const char *fmt, ...)
@@ -41,7 +50,7 @@ s8cmp(s8 a, s8 b)
 static s8
 s8trim(s8 str)
 {
-	char *p = &str.s[str.len-1];
+	u8 *p = str.s + str.len - 1;
 
 	for (; str.len && isspace(*p); str.len--, p--);
 	for (; str.len && isspace(*str.s); str.len--, str.s++);
@@ -53,8 +62,8 @@ s8trim(s8 str)
 static s8
 unescape(s8 str)
 {
-	char *t = str.s;
-	ptrdiff_t rem = str.len;
+	u8 *t    = str.s;
+	size rem = str.len;
 	int off;
 
 	while ((t = memchr(t, '\\', rem)) != NULL) {
@@ -84,12 +93,20 @@ xreallocarray(void *o, size_t n, size_t s)
 }
 
 static s8
-s8dup(void *src, ptrdiff_t len)
+s8dup(void *src, size len)
 {
-	s8 str = {0, len};
+	s8 str = {.len = len};
 	if (len < 0)
 		die("s8dup(): negative len\n");
 	str.s = xreallocarray(NULL, 1, len);
 	memcpy(str.s, src, len);
 	return str;
+}
+
+static s8
+cstr_to_s8(char *cstr)
+{
+	s8 result = {.s = (u8 *)cstr};
+	if (cstr) while (*cstr) { result.len++; cstr++; }
+	return result;
 }

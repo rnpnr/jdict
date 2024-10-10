@@ -2,15 +2,12 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
-#include <stddef.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include "arg.h"
 #include "util.c"
 #include "yomidict.c"
 
@@ -21,10 +18,6 @@
 
 /* Number of hash table slots (1 << HT_EXP) */
 #define HT_EXP 20
-
-typedef uint64_t u64;
-typedef uint32_t u32;
-typedef int32_t  i32;
 
 typedef struct {
 	s8 term;
@@ -45,10 +38,8 @@ typedef struct {
 
 #include "config.h"
 
-char *argv0;
-
 static void
-usage(void)
+usage(char *argv0)
 {
 	die("usage: %s [-d path] [-F FS] [-i] term ...\n", argv0);
 }
@@ -251,14 +242,14 @@ make_dict(Dict *d)
 
 	d->ht.ents = xreallocarray(NULL, sizeof(DictEnt *), 1 << HT_EXP);
 
-	snprintf(path, LEN(path), "%s/%s", prefix, d->rom);
+	snprintf(path, ARRAY_COUNT(path), "%s/%s", prefix, d->rom);
 	if ((nbanks = count_term_banks(path)) == 0) {
 		fprintf(stderr, "no term banks found: %s\n", path);
 		return 0;
 	}
 
 	for (size_t i = 1; i <= nbanks; i++) {
-		snprintf(tbank, LEN(tbank), "%s/term_bank_%zu.json", path, i);
+		snprintf(tbank, ARRAY_COUNT(tbank), "%s/term_bank_%zu.json", path, i);
 		parse_term_bank(&d->ht, tbank);
 	}
 
@@ -318,8 +309,8 @@ find_and_print_defs(Dict *dict, s8 *terms, size_t nterms)
 static void
 repl(Dict *dicts, size_t ndicts)
 {
-	char t[BUFLEN];
-	s8 buf = {t, BUFLEN};
+	u8 t[BUFLEN];
+	s8 buf = {.len = ARRAY_COUNT(t), .s = t};
 	size_t i;
 
 	make_dicts(dicts, ndicts);
@@ -328,10 +319,10 @@ repl(Dict *dicts, size_t ndicts)
 	for (;;) {
 		fputs(repl_prompt, stdout);
 		fflush(stdout);
-		buf.len = BUFLEN;
-		if (fgets(buf.s, buf.len, stdin) == NULL)
+		buf.len = ARRAY_COUNT(t);
+		if (fgets((char *)buf.s, buf.len, stdin) == NULL)
 			break;
-		buf.len = strlen(buf.s);
+		buf.len = strlen((char *)buf.s);
 		for (i = 0; i < ndicts; i++)
 			find_and_print(s8trim(buf), &dicts[i]);
 	}
@@ -342,59 +333,63 @@ int
 main(int argc, char *argv[])
 {
 	s8 *terms = NULL;
-	char *t;
 	Dict *dicts = NULL;
-	size_t i, ndicts = 0, nterms = 0;
+	size_t ndicts = 0, nterms = 0;
 	int iflag = 0;
 
-	argv0 = argv[0];
-
-	ARGBEGIN {
-	case 'd':
-		t = EARGF(usage());
-		for (i = 0; i < LEN(default_dict_map); i++) {
-			if (strcmp(t, default_dict_map[i].rom) == 0) {
-				dicts = &default_dict_map[i];
-				ndicts++;
-				break;
-			}
+	char *argv0 = argv[0];
+	for (argv++, argc--; argv[0] && argv[0][0] == '-' && argv[0][1]; argc--, argv++) {
+		/* NOTE: '--' to end parameters */
+		if (argv[0][1] == '-' && argv[0][2] == 0) {
+			argv++;
+			argc--;
+			break;
 		}
-		if (dicts == NULL)
-			die("invalid dictionary name: %s\n", t);
-		break;
-	case 'F':
-		t = EARGF(usage());
-		fsep = unescape((s8){t, strlen(t)});
-		break;
-	case 'i':
-		iflag = 1;
-		break;
-	default:
-		usage();
-	} ARGEND
+		switch (argv[0][1]) {
+		case 'F':
+			if (!argv[1] || !argv[1][0])
+				usage(argv0);
+			fsep = unescape(cstr_to_s8(argv[1]));
+			argv++;
+			break;
+		case 'd':
+			if (!argv[1] || !argv[1][0])
+				usage(argv0);
+			for (u32 j = 0; j < ARRAY_COUNT(default_dict_map); j++) {
+				if (strcmp(argv[1], default_dict_map[j].rom) == 0) {
+					dicts = &default_dict_map[j];
+					ndicts++;
+					break;
+				}
+			}
+			if (dicts == NULL)
+				die("invalid dictionary name: %s\n", argv[1]);
+			argv++;
+			break;
+		case 'i': iflag = 1;   break;
+		default: usage(argv0); break;
+		}
+	}
 
 	if (ndicts == 0) {
-		dicts = default_dict_map;
-		ndicts = LEN(default_dict_map);
+		dicts  = default_dict_map;
+		ndicts = ARRAY_COUNT(default_dict_map);
 	}
 
 	/* remaining argv elements are terms to search for */
-	for (i = 0; argc && *argv; argv++, i++, argc--) {
+	for (i32 i = 0; argc && *argv; argv++, i++, argc--) {
 		terms = xreallocarray(terms, ++nterms, sizeof(s8));
-		terms[i].s = *argv;
-		terms[i].len = strlen(terms[i].s);
+		terms[i] = cstr_to_s8(*argv);
 	}
 
 	if (nterms == 0 && iflag == 0)
-		usage();
+		usage(argv0);
 
 	if (iflag == 0)
-		for (i = 0; i < ndicts; i++)
+		for (size_t i = 0; i < ndicts; i++)
 			find_and_print_defs(&dicts[i], terms, nterms);
 	else
 		repl(dicts, ndicts);
-
-	free(terms);
 
 	return 0;
 }
