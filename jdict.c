@@ -19,10 +19,14 @@
 /* Number of hash table slots (1 << HT_EXP) */
 #define HT_EXP 20
 
+typedef struct DictDef {
+	s8 text;
+	struct DictDef *next;
+} DictDef;
+
 typedef struct {
 	s8 term;
-	s8 *defs;
-	size_t ndefs;
+	DictDef *def;
 } DictEnt;
 
 struct ht {
@@ -42,21 +46,6 @@ static void
 usage(char *argv0)
 {
 	die("usage: %s [-d path] [-F FS] [-i] term ...\n", argv0);
-}
-
-static void
-merge_ents(DictEnt *a, DictEnt *b)
-{
-	size_t i, nlen = a->ndefs + b->ndefs;
-
-	if (nlen == 0)
-		return;
-
-	a->defs = xreallocarray(a->defs, nlen, sizeof(s8));
-
-	for (i = 0; i < b->ndefs; i++)
-		a->defs[a->ndefs + i] = b->defs[i];
-	a->ndefs = nlen;
 }
 
 /* FNV-1a hash */
@@ -79,27 +68,26 @@ ht_lookup(u64 hash, int exp, i32 idx)
 	return (idx + step) & mask;
 }
 
-static DictEnt *
-intern(struct ht *t, DictEnt *e)
+static DictEnt **
+intern(struct ht *t, s8 key)
 {
-	s8 key = e->term;
 	u64 h = hash(key);
 	i32 i = h;
 	for (;;) {
 		i = ht_lookup(h, HT_EXP, i);
 		if (!t->ents[i]) {
 			/* empty slot */
-			if ((u32)t->len + 1 == (u32)1<<(HT_EXP - 1)) {
+			#ifdef _DEBUG
+			if ((u32)t->len + 1 == (u32)1<<(HT_EXP - 1))
 				fputs("intern: ht exceeded 0.5 fill factor\n", stderr);
-				return NULL;
-			}
+			#endif
 			t->len++;
-			t->ents[i] = e;
-			return e;
-		} else if (!s8cmp(t->ents[i]->term, e->term)) {
+			return t->ents + i;
+		} else if (!s8cmp(t->ents[i]->term, key)) {
 			/* found; return the stored instance */
-			return t->ents[i];
+			return t->ents + i;
 		}
+		/* NOTE: else relookup and try again */
 	}
 }
 
@@ -124,74 +112,26 @@ count_term_banks(const char *path)
 	return nbanks;
 }
 
-/* takes a token of type YOMI_ENTRY and creates a DictEnt */
-static DictEnt *
-make_ent(YomiTok *toks, char *data)
-{
-	size_t i;
-	DictEnt *d;
-	YomiTok *tstr = NULL, *tdefs = NULL;
-
-	if (toks[0].type != YOMI_ENTRY) {
-		fprintf(stderr, "toks[0].type = %d\n", toks[0].type);
-		return NULL;
-	}
-
-	for (i = 1; i < toks[0].len; i++)
-		switch (toks[i].type) {
-		case YOMI_STR:
-			if (tstr == NULL)
-				tstr = &toks[i];
-			break;
-		case YOMI_ARRAY:
-			if (tdefs == NULL)
-				tdefs = &toks[i];
-		default: /* FALLTHROUGH */
-			break;
-		}
-
-	/* check if entry was valid */
-	if (tdefs == NULL || tstr == NULL) {
-		fprintf(stderr, "make_ent: %s == NULL\n",
-		        tdefs == NULL? "tdefs" : "tstr");
-		return NULL;
-	}
-
-	d = xreallocarray(NULL, 1, sizeof(DictEnt));
-	d->term = s8dup(data + tstr->start, tstr->end - tstr->start);
-	d->ndefs = tdefs->len;
-	d->defs = xreallocarray(NULL, d->ndefs, sizeof(s8));
-	for (i = 1; i <= d->ndefs; i++)
-		d->defs[i - 1] = s8dup(data + tdefs[i].start,
-		                       tdefs[i].end - tdefs[i].start);
-
-	return d;
-}
-
 static void
 parse_term_bank(struct ht *ht, const char *tbank)
 {
-	int i = 0, r, ntoks, fd;
-	size_t flen;
-	char *data;
-	YomiTok *toks = NULL;
-	YomiScanner s = {0};
-	DictEnt *e, *n;
-
-	if ((fd = open(tbank, O_RDONLY)) < 0)
+	i32 fd = open(tbank, O_RDONLY);
+	if (fd < 0)
 		die("can't open file: %s\n", tbank);
-	flen = lseek(fd, 0, SEEK_END);
-	data = mmap(NULL, flen, PROT_READ, MAP_PRIVATE, fd, 0);
+	size flen = lseek(fd, 0, SEEK_END);
+	u8 *data = mmap(NULL, flen, PROT_READ, MAP_PRIVATE, fd, 0);
 	close(fd);
 
 	if (data == MAP_FAILED)
 		die("couldn't mmap file: %s\n", tbank);
 
 	/* allocate tokens */
-	ntoks = (1 << HT_EXP) * YOMI_TOKS_PER_ENT + 1;
-	toks = xreallocarray(toks, ntoks, sizeof(YomiTok));
+	size ntoks = (1 << HT_EXP) * YOMI_TOKS_PER_ENT + 1;
+	YomiTok *toks = calloc(ntoks, sizeof(YomiTok));
 
-	yomi_scanner_init(&s, data, flen);
+	YomiScanner s = {0};
+	yomi_scanner_init(&s, (char *)data, flen);
+	i32 r;
 	while ((r = yomi_scan(&s, toks, ntoks)) < 0) {
 		switch (r) {
 		case YOMI_ERROR_NOMEM:
@@ -205,28 +145,56 @@ parse_term_bank(struct ht *ht, const char *tbank)
 		}
 	}
 
-	for (i = 0; i < r; i++) {
-		if (toks[i].type != YOMI_ENTRY)
+	for (i32 i = 0; i < r; i++) {
+		YomiTok *base_tok = toks + i;
+		if (base_tok->type != YOMI_ENTRY)
 			continue;
 
-		if ((e = make_ent(&toks[i], data)) == NULL)
-			break;
-		if ((n = intern(ht, e)) == NULL)
-			break;
-		if (n == e)
-			continue;
-		/* hash table entry already exists, append new defs */
-		if (s8cmp(n->term, e->term)) {
-			fputs("hash collision: ", stderr);
-			fwrite(e->term.s, e->term.len, 1, stderr);
-			fputc('\t', stderr);
-			fwrite(n->term.s, n->term.len, 1, stderr);
-			fputc('\n', stderr);
+		YomiTok *tstr = NULL, *tdefs = NULL;
+		for (size_t j = 1; j < base_tok->len; j++) {
+			switch (base_tok[j].type) {
+			case YOMI_STR:
+				if (tstr == NULL)
+					tstr = base_tok + j;
+				break;
+			case YOMI_ARRAY:
+				if (tdefs == NULL)
+					tdefs = base_tok + j;
+			default: /* FALLTHROUGH */
+				break;
+			}
 		}
-		merge_ents(n, e);
-		free(e->term.s);
-		free(e->defs);
-		free(e);
+
+		/* check if entry was valid */
+		if (tdefs == NULL || tstr == NULL) {
+			fprintf(stderr, "parse_term_bank: %s == NULL\n",
+			        tdefs == NULL? "tdefs" : "tstr");
+			break;
+		}
+
+		s8 mem_term = {.len = tstr->end - tstr->start, .s = data + tstr->start};
+		DictEnt **n = intern(ht, mem_term);
+
+		if (!*n) {
+			*n         = calloc(1, sizeof(DictEnt));
+			(*n)->term = s8dup(mem_term);
+		} else {
+			if (s8cmp((*n)->term, mem_term)) {
+				fputs("hash collision: ", stderr);
+				fwrite(mem_term.s, mem_term.len, 1, stderr);
+				fputc('\t', stderr);
+				fwrite((*n)->term.s, (*n)->term.len, 1, stderr);
+				fputc('\n', stderr);
+			}
+		}
+
+		for (size_t i = 1; i <= tdefs->len; i++) {
+			DictDef *def = calloc(1, sizeof(*def));
+			def->text = s8dup((s8){.len = tdefs[i].end - tdefs[i].start,
+			                       .s = data + tdefs[i].start});
+			def->next = (*n)->def;
+			(*n)->def = def;
+		}
 	}
 
 cleanup:
@@ -276,17 +244,16 @@ static void
 find_and_print(s8 term, Dict *d)
 {
 	DictEnt *ent = find_ent(term, d);
-	size_t i;
 
 	if (!ent || s8cmp(term, ent->term))
 		return;
 
-	for (i = 0; i < ent->ndefs; i++) {
+	for (DictDef *def = ent->def; def; def = def->next) {
 		if (!s8cmp(fsep, s8("\n")))
-			ent->defs[i] = unescape(ent->defs[i]);
+			def->text = unescape(def->text);
 		fputs(d->name, stdout);
 		fwrite(fsep.s, fsep.len, 1, stdout);
-		fwrite(ent->defs[i].s, ent->defs[i].len, 1, stdout);
+		fwrite(def->text.s, def->text.len, 1, stdout);
 		fputc('\n', stdout);
 	}
 }

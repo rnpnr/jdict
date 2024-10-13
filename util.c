@@ -15,6 +15,12 @@ typedef int32_t   i32;
 typedef uint32_t  u32;
 typedef ptrdiff_t size;
 
+#ifdef _DEBUG
+#define ASSERT(c) do { __asm("int3; nop"); } while (0)
+#else
+#define ASSERT(c) {}
+#endif
+
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof(*a))
 
 typedef struct {
@@ -93,13 +99,14 @@ xreallocarray(void *o, size_t n, size_t s)
 }
 
 static s8
-s8dup(void *src, size len)
+s8dup(s8 old)
 {
-	s8 str = {.len = len};
-	if (len < 0)
-		die("s8dup(): negative len\n");
-	str.s = xreallocarray(NULL, 1, len);
-	memcpy(str.s, src, len);
+	s8 str = {.len = old.len};
+	ASSERT(old.len >= 0);
+	if (old.len) {
+		str.s = xreallocarray(NULL, 1, old.len);
+		memcpy(str.s, old.s, old.len);
+	}
 	return str;
 }
 

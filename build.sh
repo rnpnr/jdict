@@ -1,8 +1,14 @@
 #!/bin/sh
-set -x
+cflags="-march=native -O3 -std=c99 -Wall -Wextra"
+cflags="${cflags} -D_DEFAULT_SOURCE"
+#cflags="${cflags} -fproc-stat-report"
+#cflags="${cflags} -Rpass-missed=.*"
+ldflags="-static"
 
-cflags="-march=native -O3 -std=c99 -Wall -Wextra -pedantic"
-cflags="$cflags -D_BSD_SOURCE"
-ldflags="-s -static"
+cc=${CC:-cc}
+debug=${DEBUG}
 
-cc $cflags $ldflags jdict.c -o jdict
+[ $debug ] && cflags="$cflags -O0 -ggdb -D_DEBUG"
+[ ! $debug ] && ldflags="-s $ldflags"
+
+${cc} $cflags $ldflags jdict.c -o jdict
