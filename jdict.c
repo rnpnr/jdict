@@ -17,6 +17,7 @@ typedef int64_t   i64;
 typedef uint64_t  u64;
 typedef int32_t   i32;
 typedef uint32_t  u32;
+typedef uint32_t  b32;
 typedef ptrdiff_t size;
 
 #ifdef _DEBUG
@@ -27,11 +28,20 @@ typedef ptrdiff_t size;
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof(*a))
 
+#define MEGABYTE (1024ULL * 1024ULL)
+
 typedef struct {
 	size len;
 	u8   *s;
 } s8;
 #define s8(cstr) (s8){.len = ARRAY_COUNT(cstr) - 1, .s = (u8 *)cstr}
+
+typedef struct {
+	u8 *beg, *end;
+#ifdef _DEBUG_ARENA
+	size min_capacity_remaining;
+#endif
+} Arena;
 
 #include "yomidict.c"
 
@@ -66,6 +76,78 @@ typedef struct {
 
 #include "config.h"
 
+static Arena
+os_new_arena(size cap)
+{
+	Arena a;
+
+	size pagesize = sysconf(_SC_PAGESIZE);
+	if (cap % pagesize != 0)
+		cap += pagesize - cap % pagesize;
+
+	a.beg = mmap(0, cap, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+	if (a.beg == MAP_FAILED)
+		return (Arena){0};
+	a.end = a.beg + cap;
+#ifdef _DEBUG_ARENA
+	a.min_capacity_remaining = cap;
+#endif
+	return a;
+}
+
+static void *
+mem_clear(void *p_, u8 c, size len)
+{
+	u8 *p = p_;
+	while (len) p[--len] = c;
+	return p;
+}
+
+#define alloc(a, t, n, clear)  (t *)alloc_(a, sizeof(t), _Alignof(t), n, clear)
+static void *
+alloc_(Arena *a, size len, size align, size count, b32 clear)
+{
+	size padding   = -(uintptr_t)a->beg & (align - 1);
+	size available = a->end - a->beg - padding;
+	if (available <= 0 || available / len <= count) {
+		ASSERT(0);
+	}
+
+	void *p  = a->beg + padding;
+	a->beg  += padding + count * len;
+
+#ifdef _DEBUG_ARENA
+	if (a->end - a->beg < a->min_capacity_remaining)
+		a->min_capacity_remaining = a->end - a->beg;
+#endif
+
+	if (clear) return mem_clear(p, 0, count * len);
+	else       return p;
+}
+
+/* NOTE: allocs off the end instead of the start */
+#define alloc_temp(a, t, n, clear)  (t *)alloc_temp_(a, sizeof(t), _Alignof(t), n, clear)
+static void *
+alloc_temp_(Arena *a, size len, size align, size count, b32 clear)
+{
+	size padding   = -(uintptr_t)a->end & (align - 1);
+	size available = a->end - a->beg - padding;
+	if (available <= 0 || available / len <= count) {
+		ASSERT(0);
+	}
+
+	a->end  -= padding + count * len;
+	void *p  = a->end;
+
+#ifdef _DEBUG_ARENA
+	if (a->end - a->beg < a->min_capacity_remaining)
+		a->min_capacity_remaining = a->end - a->beg;
+#endif
+
+	if (clear) return mem_clear(p, 0, count * len);
+	else       return p;
+}
+
 static void __attribute__((noreturn))
 die(const char *fmt, ...)
 {
@@ -83,6 +165,31 @@ usage(char *argv0)
 {
 	die("usage: %s [-d path] [-F FS] [-i] term ...\n", argv0);
 }
+
+static s8
+s8_alloc(Arena *a, size len)
+{
+	s8 result = {.len = len, .s = alloc(a, u8, len, 0)};
+	return result;
+}
+
+static s8
+s8_dup(Arena *a, s8 old)
+{
+	s8 result = s8_alloc(a, old.len);
+	for (size i = 0; i < old.len; i++)
+		result.s[i] = old.s[i];
+	return result;
+}
+
+static s8
+cstr_to_s8(char *cstr)
+{
+	s8 result = {.s = (u8 *)cstr};
+	if (cstr) while (*cstr) { result.len++; cstr++; }
+	return result;
+}
+
 
 static int
 s8cmp(s8 a, s8 b)
@@ -128,37 +235,6 @@ unescape(s8 str)
 	}
 
 	return str;
-}
-
-static void *
-xreallocarray(void *o, size_t n, size_t s)
-{
-	void *new;
-
-	if (!(new = reallocarray(o, n, s)))
-		die("reallocarray()\n");
-
-	return new;
-}
-
-static s8
-s8dup(s8 old)
-{
-	s8 str = {.len = old.len};
-	ASSERT(old.len >= 0);
-	if (old.len) {
-		str.s = xreallocarray(NULL, 1, old.len);
-		memcpy(str.s, old.s, old.len);
-	}
-	return str;
-}
-
-static s8
-cstr_to_s8(char *cstr)
-{
-	s8 result = {.s = (u8 *)cstr};
-	if (cstr) while (*cstr) { result.len++; cstr++; }
-	return result;
 }
 
 /* FNV-1a hash */
@@ -226,8 +302,10 @@ count_term_banks(const char *path)
 }
 
 static void
-parse_term_bank(struct ht *ht, const char *tbank)
+parse_term_bank(Arena *a, struct ht *ht, const char *tbank)
 {
+	Arena start = *a;
+
 	i32 fd = open(tbank, O_RDONLY);
 	if (fd < 0)
 		die("can't open file: %s\n", tbank);
@@ -240,7 +318,7 @@ parse_term_bank(struct ht *ht, const char *tbank)
 
 	/* allocate tokens */
 	size ntoks = (1 << HT_EXP) * YOMI_TOKS_PER_ENT + 1;
-	YomiTok *toks = calloc(ntoks, sizeof(YomiTok));
+	YomiTok *toks = alloc_temp(a, YomiTok, ntoks, 0);
 
 	YomiScanner s = {0};
 	yomi_scanner_init(&s, (char *)data, flen);
@@ -289,8 +367,8 @@ parse_term_bank(struct ht *ht, const char *tbank)
 		DictEnt **n = intern(ht, mem_term);
 
 		if (!*n) {
-			*n         = calloc(1, sizeof(DictEnt));
-			(*n)->term = s8dup(mem_term);
+			*n         = alloc(a, DictEnt, 1, 1);
+			(*n)->term = s8_dup(a, mem_term);
 		} else {
 			if (s8cmp((*n)->term, mem_term)) {
 				fputs("hash collision: ", stderr);
@@ -302,9 +380,9 @@ parse_term_bank(struct ht *ht, const char *tbank)
 		}
 
 		for (size_t i = 1; i <= tdefs->len; i++) {
-			DictDef *def = calloc(1, sizeof(*def));
-			def->text = s8dup((s8){.len = tdefs[i].end - tdefs[i].start,
-			                       .s = data + tdefs[i].start});
+			DictDef *def = alloc(a, DictDef, 1, 0);
+			def->text = s8_dup(a, (s8){.len = tdefs[i].end - tdefs[i].start,
+			                           .s = data + tdefs[i].start});
 			def->next = (*n)->def;
 			(*n)->def = def;
 		}
@@ -312,16 +390,18 @@ parse_term_bank(struct ht *ht, const char *tbank)
 
 cleanup:
 	munmap(data, flen);
-	free(toks);
+
+	/* NOTE: clear temporary allocations */
+	a->end = start.end;
 }
 
 static int
-make_dict(Dict *d)
+make_dict(Arena *a, Dict *d)
 {
 	char path[PATH_MAX - 20], tbank[PATH_MAX];
 	size_t nbanks;
 
-	d->ht.ents = xreallocarray(NULL, sizeof(DictEnt *), 1 << HT_EXP);
+	d->ht.ents = alloc(a, DictEnt *, 1 << HT_EXP, 1);
 
 	snprintf(path, ARRAY_COUNT(path), "%s/%s", prefix, d->rom);
 	if ((nbanks = count_term_banks(path)) == 0) {
@@ -331,17 +411,17 @@ make_dict(Dict *d)
 
 	for (size_t i = 1; i <= nbanks; i++) {
 		snprintf(tbank, ARRAY_COUNT(tbank), "%s/term_bank_%zu.json", path, i);
-		parse_term_bank(&d->ht, tbank);
+		parse_term_bank(a, &d->ht, tbank);
 	}
 
 	return 1;
 }
 
 static void
-make_dicts(Dict *dicts, size_t ndicts)
+make_dicts(Arena *a, Dict *dicts, size_t ndicts)
 {
 	for (size_t i = 0; i < ndicts; i++)
-		if (!make_dict(&dicts[i]))
+		if (!make_dict(a, &dicts[i]))
 			die("make_dict(%s): returned NULL\n", dicts[i].rom);
 }
 
@@ -372,11 +452,11 @@ find_and_print(s8 term, Dict *d)
 }
 
 static void
-find_and_print_defs(Dict *dict, s8 *terms, size_t nterms)
+find_and_print_defs(Arena *a, Dict *dict, s8 *terms, size_t nterms)
 {
 	size_t i;
 
-	if (!make_dict(dict)) {
+	if (!make_dict(a, dict)) {
 		fputs("failed to allocate dict: ", stdout);
 		puts(dict->rom);
 		return;
@@ -387,13 +467,13 @@ find_and_print_defs(Dict *dict, s8 *terms, size_t nterms)
 }
 
 static void
-repl(Dict *dicts, size_t ndicts)
+repl(Arena *a, Dict *dicts, size_t ndicts)
 {
 	u8 t[BUFLEN];
 	s8 buf = {.len = ARRAY_COUNT(t), .s = t};
 	size_t i;
 
-	make_dicts(dicts, ndicts);
+	make_dicts(a, dicts, ndicts);
 
 	fsep = s8("\n");
 	for (;;) {
@@ -412,7 +492,7 @@ repl(Dict *dicts, size_t ndicts)
 int
 main(int argc, char *argv[])
 {
-	s8 *terms = NULL;
+	Arena memory = os_new_arena(1024 * MEGABYTE);
 	Dict *dicts = NULL;
 	size_t ndicts = 0, nterms = 0;
 	int iflag = 0;
@@ -456,20 +536,25 @@ main(int argc, char *argv[])
 		ndicts = ARRAY_COUNT(default_dict_map);
 	}
 
-	/* remaining argv elements are terms to search for */
-	for (i32 i = 0; argc && *argv; argv++, i++, argc--) {
-		terms = xreallocarray(terms, ++nterms, sizeof(s8));
+	/* NOTE: remaining argv elements are search terms */
+	nterms = argc;
+	s8 *terms = alloc(&memory, s8, nterms, 0);
+	for (i32 i = 0; argc && *argv; argv++, i++, argc--)
 		terms[i] = cstr_to_s8(*argv);
-	}
 
 	if (nterms == 0 && iflag == 0)
 		usage(argv0);
 
 	if (iflag == 0)
 		for (size_t i = 0; i < ndicts; i++)
-			find_and_print_defs(&dicts[i], terms, nterms);
+			find_and_print_defs(&memory, &dicts[i], terms, nterms);
 	else
-		repl(dicts, ndicts);
+		repl(&memory, dicts, ndicts);
+
+#ifdef _DEBUG_ARENA
+	printf("min remaining arena capacity: %zd\n", memory.min_capacity_remaining);
+	printf("remaining arena capacity: %zd\n", memory.end - memory.beg);
+#endif
 
 	return 0;
 }
