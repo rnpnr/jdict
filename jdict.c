@@ -1,5 +1,4 @@
 /* See LICENSE for license details. */
-#include <ctype.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -27,6 +26,7 @@ typedef ptrdiff_t size;
 #endif
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof(*a))
+#define ISSPACE(c)     ((c) == ' ' || (c) == '\n' || (c) == '\t')
 
 #define MEGABYTE (1024ULL * 1024ULL)
 
@@ -208,8 +208,8 @@ s8trim(s8 str)
 {
 	u8 *p = str.s + str.len - 1;
 
-	for (; str.len && isspace(*p); str.len--, p--);
-	for (; str.len && isspace(*str.s); str.len--, str.s++);
+	for (; str.len && ISSPACE(*p); str.len--, p--);
+	for (; str.len && ISSPACE(*str.s); str.len--, str.s++);
 
 	return str;
 }
