@@ -5,8 +5,6 @@
  * banks as well as searching through lexed tokens should be
  * implemented elsewhere.
  */
-#include <stddef.h>
-#include <stdlib.h>
 
 #define ul unsigned long
 
