@@ -103,49 +103,41 @@ mem_clear(void *p_, u8 c, size len)
 	return p;
 }
 
-#define alloc(a, t, n, clear)  (t *)alloc_(a, sizeof(t), _Alignof(t), n, clear)
-static void *
-alloc_(Arena *a, size len, size align, size count, b32 clear)
-{
-	size padding   = -(uintptr_t)a->beg & (align - 1);
-	size available = a->end - a->beg - padding;
-	if (available <= 0 || available / len <= count) {
-		ASSERT(0);
-	}
 
-	void *p  = a->beg + padding;
-	a->beg  += padding + count * len;
+enum arena_flags {
+	ARENA_NONE      = 0 << 0,
+	ARENA_NO_CLEAR  = 1 << 0,
+	ARENA_ALLOC_END = 1 << 1,
+};
+
+#define alloc(a, t, n, flags)  (t *)alloc_(a, sizeof(t), _Alignof(t), n, flags)
+static void *
+alloc_(Arena *a, size len, size align, size count, u32 flags)
+{
+	size padding;
+	if (flags & ARENA_ALLOC_END) padding = -(uintptr_t)a->end & (align - 1);
+	else                         padding = -(uintptr_t)a->beg & (align - 1);
+
+	size available = a->end - a->beg - padding;
+	if (available <= 0 || available / len <= count)
+		ASSERT(0);
+
+	void *result;
+	if (flags & ARENA_ALLOC_END) {
+		a->end -= padding + count * len;
+		result  = a->end;
+	} else {
+		result  = a->beg + padding;
+		a->beg += padding + count * len;
+	}
 
 #ifdef _DEBUG_ARENA
 	if (a->end - a->beg < a->min_capacity_remaining)
 		a->min_capacity_remaining = a->end - a->beg;
 #endif
 
-	if (clear) return mem_clear(p, 0, count * len);
-	else       return p;
-}
-
-/* NOTE: allocs off the end instead of the start */
-#define alloc_temp(a, t, n, clear)  (t *)alloc_temp_(a, sizeof(t), _Alignof(t), n, clear)
-static void *
-alloc_temp_(Arena *a, size len, size align, size count, b32 clear)
-{
-	size padding   = -(uintptr_t)a->end & (align - 1);
-	size available = a->end - a->beg - padding;
-	if (available <= 0 || available / len <= count) {
-		ASSERT(0);
-	}
-
-	a->end  -= padding + count * len;
-	void *p  = a->end;
-
-#ifdef _DEBUG_ARENA
-	if (a->end - a->beg < a->min_capacity_remaining)
-		a->min_capacity_remaining = a->end - a->beg;
-#endif
-
-	if (clear) return mem_clear(p, 0, count * len);
-	else       return p;
+	if (flags & ARENA_NO_CLEAR) return result;
+	else                        return mem_clear(result, 0, count * len);
 }
 
 static void __attribute__((noreturn))
@@ -169,7 +161,7 @@ usage(char *argv0)
 static s8
 s8_alloc(Arena *a, size len)
 {
-	s8 result = {.len = len, .s = alloc(a, u8, len, 0)};
+	s8 result = {.len = len, .s = alloc(a, u8, len, ARENA_NO_CLEAR)};
 	return result;
 }
 
@@ -318,7 +310,7 @@ parse_term_bank(Arena *a, struct ht *ht, const char *tbank)
 
 	/* allocate tokens */
 	size ntoks = (1 << HT_EXP) * YOMI_TOKS_PER_ENT + 1;
-	YomiTok *toks = alloc_temp(a, YomiTok, ntoks, 0);
+	YomiTok *toks = alloc(a, YomiTok, ntoks, ARENA_ALLOC_END|ARENA_NO_CLEAR);
 
 	YomiScanner s = {0};
 	yomi_scanner_init(&s, (char *)data, flen);
@@ -367,7 +359,7 @@ parse_term_bank(Arena *a, struct ht *ht, const char *tbank)
 		DictEnt **n = intern(ht, mem_term);
 
 		if (!*n) {
-			*n         = alloc(a, DictEnt, 1, 1);
+			*n         = alloc(a, DictEnt, 1, 0);
 			(*n)->term = s8_dup(a, mem_term);
 		} else {
 			if (s8cmp((*n)->term, mem_term)) {
@@ -380,7 +372,7 @@ parse_term_bank(Arena *a, struct ht *ht, const char *tbank)
 		}
 
 		for (size_t i = 1; i <= tdefs->len; i++) {
-			DictDef *def = alloc(a, DictDef, 1, 0);
+			DictDef *def = alloc(a, DictDef, 1, ARENA_NO_CLEAR);
 			def->text = s8_dup(a, (s8){.len = tdefs[i].end - tdefs[i].start,
 			                           .s = data + tdefs[i].start});
 			def->next = (*n)->def;
@@ -401,7 +393,7 @@ make_dict(Arena *a, Dict *d)
 	char path[PATH_MAX - 20], tbank[PATH_MAX];
 	size_t nbanks;
 
-	d->ht.ents = alloc(a, DictEnt *, 1 << HT_EXP, 1);
+	d->ht.ents = alloc(a, DictEnt *, 1 << HT_EXP, 0);
 
 	snprintf(path, ARRAY_COUNT(path), "%s/%s", prefix, d->rom);
 	if ((nbanks = count_term_banks(path)) == 0) {
