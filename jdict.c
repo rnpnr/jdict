@@ -222,13 +222,6 @@ mem_clear(void *p_, u8 c, size len)
 	return p;
 }
 
-static void
-mem_move(u8 *src, u8 *dest, size n)
-{
-	if (dest < src) while (n > 0) { *dest++ = *src++; n--; }
-	else            while (n > 0) { n--; dest[n] = src[n]; }
-}
-
 enum arena_flags {
 	ARENA_NONE      = 0 << 0,
 	ARENA_NO_CLEAR  = 1 << 0,
@@ -323,14 +316,14 @@ unescape(s8 str)
 {
 	for (size i = 0; i < str.len; i++) {
 		if (str.s[i] == '\\') {
-			i32 off = 1;
 			switch (str.s[i + 1]) {
-			case 'n': str.s[i++] = '\n'; break;
-			case 't': str.s[i++] = '\t'; break;
+			case 'n': str.s[i] = '\n'; break;
+			case 't': str.s[i] = '\t'; break;
 			default: continue;
 			}
-			size rem = str.len-- - off - i;
-			mem_move(str.s + i + off, str.s + i, rem);
+			str.len--;
+			for (size j = i + 1; j < str.len; j++)
+				str.s[j] = str.s[j + 1];
 		}
 	}
 	return str;
