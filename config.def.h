@@ -12,8 +12,8 @@ static char *repl_quit = "\n\033[36m(=^ᆺ^)ﾉ　バイバイ～\033[0m";
 
 /* default yomidicts to search */
 Dict default_dict_map[] = {
-	/* folder name       display name */
-	{.rom = "daijirin",  .name = "【三省堂　スーパー大辞林】"},
-	{.rom = "daijisen",  .name = "【大辞泉】"},
-	{.rom = "koujien",   .name = "【広辞苑】"},
+	/* folder name           display name */
+	{.rom = s8("daijirin"),  .name = s8("【三省堂　スーパー大辞林】")},
+	{.rom = s8("daijisen"),  .name = s8("【大辞泉】")},
+	{.rom = s8("koujien"),   .name = s8("【広辞苑】")},
 };
