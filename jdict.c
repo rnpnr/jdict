@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <stdint.h>
@@ -93,6 +94,38 @@ os_new_arena(size cap)
 	a.min_capacity_remaining = cap;
 #endif
 	return a;
+}
+
+static size
+os_file_size(char *file)
+{
+	struct stat st;
+	if (stat(file, &st) < 0) {
+		fprintf(stderr, "failed to stat: %s\n", file);
+		exit(1);
+	}
+	return st.st_size;
+}
+
+static s8
+os_read_file(char *file, u8 *buf, size file_size)
+{
+	i32 fd = open(file, O_RDONLY);
+	if (fd < 0) {
+		fprintf(stderr, "failed to open: %s\n", file);
+		exit(1);
+	}
+
+	s8 result = {.len = file_size, .s = buf};
+	size rlen = read(fd, result.s, result.len);
+	close(fd);
+
+	if (rlen != result.len) {
+		fprintf(stderr, "failed to read whole file: %s\n", file);
+		exit(1);
+	}
+
+	return result;
 }
 
 static void *
@@ -294,26 +327,20 @@ count_term_banks(const char *path)
 }
 
 static void
-parse_term_bank(Arena *a, struct ht *ht, const char *tbank)
+parse_term_bank(Arena *a, struct ht *ht, char *tbank)
 {
 	Arena start = *a;
 
-	i32 fd = open(tbank, O_RDONLY);
-	if (fd < 0)
-		die("can't open file: %s\n", tbank);
-	size flen = lseek(fd, 0, SEEK_END);
-	u8 *data = mmap(NULL, flen, PROT_READ, MAP_PRIVATE, fd, 0);
-	close(fd);
-
-	if (data == MAP_FAILED)
-		die("couldn't mmap file: %s\n", tbank);
+	size file_size = os_file_size(tbank);
+	u8 *file_buf   = alloc(a, u8, file_size, ARENA_ALLOC_END|ARENA_NO_CLEAR);
+	s8 data        = os_read_file(tbank, file_buf, file_size);
 
 	/* allocate tokens */
 	size ntoks = (1 << HT_EXP) * YOMI_TOKS_PER_ENT + 1;
 	YomiTok *toks = alloc(a, YomiTok, ntoks, ARENA_ALLOC_END|ARENA_NO_CLEAR);
 
 	YomiScanner s = {0};
-	yomi_scanner_init(&s, (char *)data, flen);
+	yomi_scanner_init(&s, (char *)data.s, data.len);
 	i32 r;
 	while ((r = yomi_scan(&s, toks, ntoks)) < 0) {
 		switch (r) {
@@ -355,7 +382,7 @@ parse_term_bank(Arena *a, struct ht *ht, const char *tbank)
 			break;
 		}
 
-		s8 mem_term = {.len = tstr->end - tstr->start, .s = data + tstr->start};
+		s8 mem_term = {.len = tstr->end - tstr->start, .s = data.s + tstr->start};
 		DictEnt **n = intern(ht, mem_term);
 
 		if (!*n) {
@@ -374,15 +401,13 @@ parse_term_bank(Arena *a, struct ht *ht, const char *tbank)
 		for (size_t i = 1; i <= tdefs->len; i++) {
 			DictDef *def = alloc(a, DictDef, 1, ARENA_NO_CLEAR);
 			def->text = s8_dup(a, (s8){.len = tdefs[i].end - tdefs[i].start,
-			                           .s = data + tdefs[i].start});
+			                           .s = data.s + tdefs[i].start});
 			def->next = (*n)->def;
 			(*n)->def = def;
 		}
 	}
 
 cleanup:
-	munmap(data, flen);
-
 	/* NOTE: clear temporary allocations */
 	a->end = start.end;
 }
