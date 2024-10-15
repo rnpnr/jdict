@@ -1,8 +1,6 @@
 /* See LICENSE for license details. */
 #include <dirent.h>
 #include <fcntl.h>
-#include <limits.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
@@ -35,6 +33,14 @@ typedef struct {
 	u8   *s;
 } s8;
 #define s8(cstr) (s8){.len = ARRAY_COUNT(cstr) - 1, .s = (u8 *)cstr}
+
+typedef struct {
+	u8   *data;
+	u32   cap;
+	u32   widx;
+	i32   fd;
+	b32   errors;
+} Stream;
 
 typedef struct {
 	u8 *beg, *end;
@@ -76,6 +82,66 @@ typedef struct {
 
 #include "config.h"
 
+#define os_path_sep s8("/")
+static b32 os_write(i32, s8);
+
+static Stream error_stream;
+
+static void
+stream_append_byte(Stream *s, u8 b)
+{
+	s->errors |= s->widx + 1 > s->cap;
+	if (!s->errors)
+		s->data[s->widx++] = b;
+}
+
+static void
+stream_append_s8(Stream *s, s8 str)
+{
+	s->errors |= (s->cap - s->widx) < str.len;
+	if (!s->errors) {
+		for (size i = 0; i < str.len; i++)
+			s->data[s->widx++] = str.s[i];
+	}
+}
+
+static void
+stream_append_u64(Stream *s, u64 n)
+{
+	u8 tmp[64];
+	u8 *end = tmp + sizeof(tmp);
+	u8 *beg = end;
+	do { *--beg = '0' + (n % 10); } while (n /= 10);
+	stream_append_s8(s, (s8){.len = end - beg, .s = beg});
+}
+
+static void
+stream_flush(Stream *s)
+{
+	if (s->widx) {
+		os_write(s->fd, (s8){.len = s->widx, .s = s->data});
+		s->widx   = 0;
+		s->errors = 0;
+	}
+}
+
+static s8
+cstr_to_s8(char *cstr)
+{
+	s8 result = {.s = (u8 *)cstr};
+	if (cstr) while (*cstr) { result.len++; cstr++; }
+	return result;
+}
+
+static void __attribute__((noreturn))
+die(Stream *s)
+{
+	if (s->data[s->widx - 1] != '\n')
+		stream_append_byte(s, '\n');
+	stream_flush(s);
+	exit(1);
+}
+
 static Arena
 os_new_arena(size cap)
 {
@@ -100,8 +166,9 @@ os_file_size(char *file)
 {
 	struct stat st;
 	if (stat(file, &st) < 0) {
-		fprintf(stderr, "failed to stat: %s\n", file);
-		exit(1);
+		stream_append_s8(&error_stream, s8("failed to stat: "));
+		stream_append_s8(&error_stream, cstr_to_s8(file));
+		die(&error_stream);
 	}
 	return st.st_size;
 }
@@ -111,8 +178,9 @@ os_read_file(char *file, u8 *buf, size file_size)
 {
 	i32 fd = open(file, O_RDONLY);
 	if (fd < 0) {
-		fprintf(stderr, "failed to open: %s\n", file);
-		exit(1);
+		stream_append_s8(&error_stream, s8("failed to open: "));
+		stream_append_s8(&error_stream, cstr_to_s8(file));
+		die(&error_stream);
 	}
 
 	s8 result = {.len = file_size, .s = buf};
@@ -120,10 +188,18 @@ os_read_file(char *file, u8 *buf, size file_size)
 	close(fd);
 
 	if (rlen != result.len) {
-		fprintf(stderr, "failed to read whole file: %s\n", file);
-		exit(1);
+		stream_append_s8(&error_stream, s8("failed to read whole file: "));
+		stream_append_s8(&error_stream, cstr_to_s8(file));
+		die(&error_stream);
 	}
 
+	return result;
+}
+
+static b32
+os_write(i32 file, s8 raw)
+{
+	b32 result = write(file, raw.s, raw.len) == raw.len;
 	return result;
 }
 
@@ -178,22 +254,13 @@ alloc_(Arena *a, size len, size align, size count, u32 flags)
 	else                        return mem_clear(result, 0, count * len);
 }
 
-static void __attribute__((noreturn))
-die(const char *fmt, ...)
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	vfprintf(stderr, fmt, ap);
-	va_end(ap);
-
-	exit(1);
-}
-
 static void
-usage(char *argv0)
+usage(s8 argv0)
 {
-	die("usage: %s [-d path] [-F FS] [-i] term ...\n", argv0);
+	stream_append_s8(&error_stream, s8("usage: "));
+	stream_append_s8(&error_stream, argv0);
+	stream_append_s8(&error_stream, s8(" [-d path] [-F FS] [-i] term ...\n"));
+	die(&error_stream);
 }
 
 static s8
@@ -211,15 +278,6 @@ s8_dup(Arena *a, s8 old)
 		result.s[i] = old.s[i];
 	return result;
 }
-
-static s8
-cstr_to_s8(char *cstr)
-{
-	s8 result = {.s = (u8 *)cstr};
-	if (cstr) while (*cstr) { result.len++; cstr++; }
-	return result;
-}
-
 
 static i32
 s8_cmp(s8 a, s8 b)
@@ -311,14 +369,17 @@ intern(struct ht *t, s8 key)
 }
 
 static size_t
-count_term_banks(const char *path)
+count_term_banks(char *path)
 {
 	DIR *dir;
 	struct dirent *dent;
 	size_t nbanks = 0;
 
-	if (!(dir = opendir(path)))
-		die("opendir(): failed to open: %s\n", path);
+	if (!(dir = opendir(path))) {
+		stream_append_s8(&error_stream, s8("opendir: failed to open: "));
+		stream_append_s8(&error_stream, cstr_to_s8(path));
+		die(&error_stream);
+	}
 
 	/* count term banks in path */
 	while ((dent = readdir(dir)) != NULL)
@@ -353,9 +414,11 @@ parse_term_bank(Arena *a, struct ht *ht, char *tbank)
 			goto cleanup;
 		case YOMI_ERROR_INVAL:
 		case YOMI_ERROR_MALFO:
-			fprintf(stderr, "yomi_parse: %s\n",
-			        r == YOMI_ERROR_INVAL? "YOMI_ERROR_INVAL"
-			        : "YOMI_ERROR_MALFO");
+			stream_append_s8(&error_stream, s8("yomi_parse: "));
+			if (r == YOMI_ERROR_INVAL)
+				stream_append_s8(&error_stream, s8("YOMI_ERROR_INVAL\n"));
+			else
+				stream_append_s8(&error_stream, s8("YOMI_ERROR_MALFO\n"));
 			goto cleanup;
 		}
 	}
@@ -382,8 +445,12 @@ parse_term_bank(Arena *a, struct ht *ht, char *tbank)
 
 		/* check if entry was valid */
 		if (tdefs == NULL || tstr == NULL) {
-			fprintf(stderr, "parse_term_bank: %s == NULL\n",
-			        tdefs == NULL? "tdefs" : "tstr");
+			stream_append_s8(&error_stream, s8("parse_term_bank: "));
+			if (!tdefs)
+				stream_append_s8(&error_stream, s8("tdefs"));
+			else
+				stream_append_s8(&error_stream, s8("tstr"));
+			stream_append_s8(&error_stream, s8(" == NULL\n"));
 			break;
 		}
 
@@ -413,6 +480,7 @@ parse_term_bank(Arena *a, struct ht *ht, char *tbank)
 	}
 
 cleanup:
+	stream_flush(&error_stream);
 	/* NOTE: clear temporary allocations */
 	a->end = start.end;
 }
@@ -420,21 +488,40 @@ cleanup:
 static int
 make_dict(Arena *a, Dict *d)
 {
-	char path[PATH_MAX - 20], tbank[PATH_MAX];
-	size_t nbanks;
+	Arena start = *a;
+	Stream path = {.cap = 1 * MEGABYTE};
+	path.data = alloc(a, u8, path.cap, ARENA_ALLOC_END|ARENA_NO_CLEAR);
+
+	stream_append_s8(&path, prefix);
+	stream_append_s8(&path, os_path_sep);
+	stream_append_s8(&path, d->rom);
+	stream_append_byte(&path, 0);
 
 	d->ht.ents = alloc(a, DictEnt *, 1 << HT_EXP, 0);
 
-	snprintf(path, ARRAY_COUNT(path), "%s/%s", prefix, d->rom.s);
-	if ((nbanks = count_term_banks(path)) == 0) {
-		fprintf(stderr, "no term banks found: %s\n", path);
+	size_t nbanks;
+	if ((nbanks = count_term_banks((char *)path.data)) == 0) {
+		stream_append_s8(&error_stream, s8("no term banks found: "));
+		stream_append_s8(&error_stream, (s8){.len = path.widx - 1, .s = path.data});
+		stream_append_byte(&error_stream, '\n');
+		stream_flush(&error_stream);
 		return 0;
 	}
 
+	path.widx -= 1;
+	stream_append_s8(&path, os_path_sep);
+	stream_append_s8(&path, s8("term_bank_"));
+	i32 start_widx = path.widx;
+
 	for (size_t i = 1; i <= nbanks; i++) {
-		snprintf(tbank, ARRAY_COUNT(tbank), "%s/term_bank_%zu.json", path, i);
-		parse_term_bank(a, &d->ht, tbank);
+		path.widx = start_widx;
+		stream_append_u64(&path, i);
+		stream_append_s8(&path, s8(".json\0"));
+		parse_term_bank(a, &d->ht, (char *)path.data);
 	}
+
+	/* NOTE: clear temporary allocations */
+	a->end = start.end;
 
 	return 1;
 }
@@ -442,9 +529,13 @@ make_dict(Arena *a, Dict *d)
 static void
 make_dicts(Arena *a, Dict *dicts, size_t ndicts)
 {
-	for (size_t i = 0; i < ndicts; i++)
-		if (!make_dict(a, &dicts[i]))
-			die("make_dict(%s): returned NULL\n", dicts[i].rom);
+	for (size_t i = 0; i < ndicts; i++) {
+		if (!make_dict(a, &dicts[i])) {
+			stream_append_s8(&error_stream, s8("make_dict failed for: "));
+			stream_append_s8(&error_stream, dicts[i].rom);
+			die(&error_stream);
+		}
+	}
 }
 
 static DictEnt *
@@ -496,7 +587,7 @@ repl(Arena *a, Dict *dicts, size_t ndicts)
 
 	fsep = s8("\n");
 	for (;;) {
-		fputs(repl_prompt, stdout);
+		fwrite(repl_prompt.s, 1, repl_prompt.len, stdout);
 		fflush(stdout);
 		if (fgets((char *)buf.s, ARRAY_COUNT(t), stdin) == NULL)
 			break;
@@ -504,7 +595,9 @@ repl(Arena *a, Dict *dicts, size_t ndicts)
 		for (size_t i = 0; i < ndicts; i++)
 			find_and_print(s8trim(buf), &dicts[i]);
 	}
-	puts(repl_quit);
+	fwrite(repl_quit.s, 1, repl_quit.len, stdout);
+	if (repl_quit.s[repl_quit.len - 1] != '\n')
+		fputc('\n', stdout);
 }
 
 int
@@ -515,7 +608,11 @@ main(int argc, char *argv[])
 	size_t ndicts = 0, nterms = 0;
 	int iflag = 0;
 
-	char *argv0 = argv[0];
+	error_stream.fd   = STDERR_FILENO;
+	error_stream.cap  = 4096;
+	error_stream.data = alloc(&memory, u8, error_stream.cap, 0);
+
+	s8 argv0 = cstr_to_s8(argv[0]);
 	for (argv++, argc--; argv[0] && argv[0][0] == '-' && argv[0][1]; argc--, argv++) {
 		/* NOTE: '--' to end parameters */
 		if (argv[0][1] == '-' && argv[0][2] == 0) {
@@ -541,8 +638,11 @@ main(int argc, char *argv[])
 					break;
 				}
 			}
-			if (dicts == NULL)
-				die("invalid dictionary name: %s\n", argv[1]);
+			if (dicts == NULL) {
+				stream_append_s8(&error_stream, s8("invalid dictionary name: "));
+				stream_append_s8(&error_stream, dname);
+				die(&error_stream);
+			}
 			argv++;
 		} break;
 		case 'i': iflag = 1;   break;
@@ -571,8 +671,12 @@ main(int argc, char *argv[])
 		repl(&memory, dicts, ndicts);
 
 #ifdef _DEBUG_ARENA
-	printf("min remaining arena capacity: %zd\n", memory.min_capacity_remaining);
-	printf("remaining arena capacity: %zd\n", memory.end - memory.beg);
+	stream_append_s8(&error_stream, s8("min remaining arena capacity: "));
+	stream_append_u64(&error_stream, memory.min_capacity_remaining);
+	stream_append_s8(&error_stream, s8("\nremaining arena capacity: "));
+	stream_append_u64(&error_stream, memory.end - memory.beg);
+	stream_append_byte(&error_stream, '\n');
+	stream_flush(&error_stream);
 #endif
 
 	return 0;
