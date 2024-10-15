@@ -2,7 +2,6 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -21,6 +20,10 @@ typedef ptrdiff_t size;
 #define ASSERT(c) do { __asm("int3; nop"); } while (0)
 #else
 #define ASSERT(c) {}
+#endif
+
+#ifndef unreachable
+#define unreachable() __builtin_unreachable()
 #endif
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof(*a))
@@ -84,6 +87,7 @@ typedef struct {
 
 #define os_path_sep s8("/")
 static b32 os_write(i32, s8);
+static void __attribute__((noreturn)) os_exit(i32);
 
 static Stream error_stream;
 
@@ -139,7 +143,14 @@ die(Stream *s)
 	if (s->data[s->widx - 1] != '\n')
 		stream_append_byte(s, '\n');
 	stream_flush(s);
-	exit(1);
+	os_exit(1);
+}
+
+static void
+os_exit(i32 code)
+{
+	_exit(code);
+	unreachable();
 }
 
 static Arena
