@@ -5,7 +5,6 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -70,8 +69,8 @@ struct ht {
 };
 
 typedef struct {
-	const char *rom;
-	const char *name;
+	s8 rom;
+	s8 name;
 	struct ht ht;
 } Dict;
 
@@ -136,6 +135,12 @@ mem_clear(void *p_, u8 c, size len)
 	return p;
 }
 
+static void
+mem_move(u8 *src, u8 *dest, size n)
+{
+	if (dest < src) while (n > 0) { *dest++ = *src++; n--; }
+	else            while (n > 0) { n--; dest[n] = src[n]; }
+}
 
 enum arena_flags {
 	ARENA_NONE      = 0 << 0,
@@ -216,12 +221,16 @@ cstr_to_s8(char *cstr)
 }
 
 
-static int
-s8cmp(s8 a, s8 b)
+static i32
+s8_cmp(s8 a, s8 b)
 {
 	if (a.len == 0 || a.len != b.len)
 		return a.len - b.len;
-	return memcmp(a.s, b.s, a.len);
+	i32 result = 0;
+	/* NOTE: we assume short strings in this program */
+	for (size i = 0; i < a.len; i++)
+		result += b.s[i] - a.s[i];
+	return result;
 }
 
 /*
@@ -243,22 +252,18 @@ s8trim(s8 str)
 static s8
 unescape(s8 str)
 {
-	u8 *t    = str.s;
-	size rem = str.len;
-	int off;
-
-	while ((t = memchr(t, '\\', rem)) != NULL) {
-		off = 1;
-		switch (t[1]) {
-		case 'n': t[0] = '\n'; t++; break;
-		case 't': t[0] = '\t'; t++; break;
-		case 'u': t++; continue;
-		default: off++;
+	for (size i = 0; i < str.len; i++) {
+		if (str.s[i] == '\\') {
+			i32 off = 1;
+			switch (str.s[i + 1]) {
+			case 'n': str.s[i++] = '\n'; break;
+			case 't': str.s[i++] = '\t'; break;
+			default: continue;
+			}
+			size rem = str.len-- - off - i;
+			mem_move(str.s + i + off, str.s + i, rem);
 		}
-		rem = str.len-- - (t - str.s) - off;
-		memmove(t, t + off, rem);
 	}
-
 	return str;
 }
 
@@ -297,7 +302,7 @@ intern(struct ht *t, s8 key)
 			#endif
 			t->len++;
 			return t->ents + i;
-		} else if (!s8cmp(t->ents[i]->term, key)) {
+		} else if (!s8_cmp(t->ents[i]->term, key)) {
 			/* found; return the stored instance */
 			return t->ents + i;
 		}
@@ -389,7 +394,7 @@ parse_term_bank(Arena *a, struct ht *ht, char *tbank)
 			*n         = alloc(a, DictEnt, 1, 0);
 			(*n)->term = s8_dup(a, mem_term);
 		} else {
-			if (s8cmp((*n)->term, mem_term)) {
+			if (s8_cmp((*n)->term, mem_term)) {
 				fputs("hash collision: ", stderr);
 				fwrite(mem_term.s, mem_term.len, 1, stderr);
 				fputc('\t', stderr);
@@ -420,7 +425,7 @@ make_dict(Arena *a, Dict *d)
 
 	d->ht.ents = alloc(a, DictEnt *, 1 << HT_EXP, 0);
 
-	snprintf(path, ARRAY_COUNT(path), "%s/%s", prefix, d->rom);
+	snprintf(path, ARRAY_COUNT(path), "%s/%s", prefix, d->rom.s);
 	if ((nbanks = count_term_banks(path)) == 0) {
 		fprintf(stderr, "no term banks found: %s\n", path);
 		return 0;
@@ -455,15 +460,15 @@ find_and_print(s8 term, Dict *d)
 {
 	DictEnt *ent = find_ent(term, d);
 
-	if (!ent || s8cmp(term, ent->term))
+	if (!ent || s8_cmp(term, ent->term))
 		return;
 
 	for (DictDef *def = ent->def; def; def = def->next) {
-		if (!s8cmp(fsep, s8("\n")))
+		if (!s8_cmp(fsep, s8("\n")))
 			def->text = unescape(def->text);
-		fputs(d->name, stdout);
-		fwrite(fsep.s, fsep.len, 1, stdout);
-		fwrite(def->text.s, def->text.len, 1, stdout);
+		fwrite(d->name.s, 1, d->name.len, stdout);
+		fwrite(fsep.s, 1, fsep.len, stdout);
+		fwrite(def->text.s, 1, def->text.len, stdout);
 		fputc('\n', stdout);
 	}
 }
@@ -471,15 +476,13 @@ find_and_print(s8 term, Dict *d)
 static void
 find_and_print_defs(Arena *a, Dict *dict, s8 *terms, size_t nterms)
 {
-	size_t i;
-
 	if (!make_dict(a, dict)) {
 		fputs("failed to allocate dict: ", stdout);
-		puts(dict->rom);
+		fwrite(dict->rom.s, 1, dict->rom.len, stdout);
 		return;
 	}
 
-	for (i = 0; i < nterms; i++)
+	for (size_t i = 0; i < nterms; i++)
 		find_and_print(terms[i], dict);
 }
 
@@ -487,8 +490,7 @@ static void
 repl(Arena *a, Dict *dicts, size_t ndicts)
 {
 	u8 t[BUFLEN];
-	s8 buf = {.len = ARRAY_COUNT(t), .s = t};
-	size_t i;
+	s8 buf = {.s = t};
 
 	make_dicts(a, dicts, ndicts);
 
@@ -496,11 +498,10 @@ repl(Arena *a, Dict *dicts, size_t ndicts)
 	for (;;) {
 		fputs(repl_prompt, stdout);
 		fflush(stdout);
-		buf.len = ARRAY_COUNT(t);
-		if (fgets((char *)buf.s, buf.len, stdin) == NULL)
+		if (fgets((char *)buf.s, ARRAY_COUNT(t), stdin) == NULL)
 			break;
-		buf.len = strlen((char *)buf.s);
-		for (i = 0; i < ndicts; i++)
+		buf = cstr_to_s8((char *)buf.s);
+		for (size_t i = 0; i < ndicts; i++)
 			find_and_print(s8trim(buf), &dicts[i]);
 	}
 	puts(repl_quit);
@@ -529,11 +530,12 @@ main(int argc, char *argv[])
 			fsep = unescape(cstr_to_s8(argv[1]));
 			argv++;
 			break;
-		case 'd':
+		case 'd': {
 			if (!argv[1] || !argv[1][0])
 				usage(argv0);
+			s8 dname = cstr_to_s8(argv[1]);
 			for (u32 j = 0; j < ARRAY_COUNT(default_dict_map); j++) {
-				if (strcmp(argv[1], default_dict_map[j].rom) == 0) {
+				if (s8_cmp(dname, default_dict_map[j].rom) == 0) {
 					dicts = &default_dict_map[j];
 					ndicts++;
 					break;
@@ -542,7 +544,7 @@ main(int argc, char *argv[])
 			if (dicts == NULL)
 				die("invalid dictionary name: %s\n", argv[1]);
 			argv++;
-			break;
+		} break;
 		case 'i': iflag = 1;   break;
 		default: usage(argv0); break;
 		}
