@@ -1,7 +1,6 @@
 /* See LICENSE for license details. */
 #include <dirent.h>
 #include <fcntl.h>
-#include <stdio.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -90,6 +89,7 @@ static b32 os_write(i32, s8);
 static void __attribute__((noreturn)) os_exit(i32);
 
 static Stream error_stream;
+static Stream stdout_stream;
 
 static void
 stream_append_byte(Stream *s, u8 b)
@@ -182,6 +182,13 @@ os_file_size(char *file)
 		die(&error_stream);
 	}
 	return st.st_size;
+}
+
+static b32
+os_read(i32 fd, size count, u8 *buf)
+{
+	size rlen = read(fd, buf, count);
+	return rlen == count;
 }
 
 static s8
@@ -360,7 +367,9 @@ intern(struct ht *t, s8 key)
 			/* empty slot */
 			#ifdef _DEBUG
 			if ((u32)t->len + 1 == (u32)1<<(HT_EXP - 1))
-				fputs("intern: ht exceeded 0.5 fill factor\n", stderr);
+				stream_append_s8(&error_stream,
+				                 s8("intern: ht exceeded 0.5 fill factor\n"));
+				stream_flush(&error_stream);
 			#endif
 			t->len++;
 			return t->ents + i;
@@ -466,11 +475,12 @@ parse_term_bank(Arena *a, struct ht *ht, char *tbank)
 			(*n)->term = s8_dup(a, mem_term);
 		} else {
 			if (s8_cmp((*n)->term, mem_term)) {
-				fputs("hash collision: ", stderr);
-				fwrite(mem_term.s, mem_term.len, 1, stderr);
-				fputc('\t', stderr);
-				fwrite((*n)->term.s, (*n)->term.len, 1, stderr);
-				fputc('\n', stderr);
+				stream_append_s8(&error_stream, s8("hash collision: "));
+				stream_append_s8(&error_stream, mem_term);
+				stream_append_byte(&error_stream, '\t');
+				stream_append_s8(&error_stream, (*n)->term);
+				stream_append_byte(&error_stream, '\n');
+				stream_flush(&error_stream);
 			}
 		}
 
@@ -561,10 +571,11 @@ find_and_print(s8 term, Dict *d)
 	for (DictDef *def = ent->def; def; def = def->next) {
 		if (!s8_cmp(fsep, s8("\n")))
 			def->text = unescape(def->text);
-		fwrite(d->name.s, 1, d->name.len, stdout);
-		fwrite(fsep.s, 1, fsep.len, stdout);
-		fwrite(def->text.s, 1, def->text.len, stdout);
-		fputc('\n', stdout);
+		stream_append_s8(&stdout_stream, d->name);
+		stream_append_s8(&stdout_stream, fsep);
+		stream_append_s8(&stdout_stream, def->text);
+		stream_append_byte(&stdout_stream, '\n');
+		stream_flush(&stdout_stream);
 	}
 }
 
@@ -572,8 +583,10 @@ static void
 find_and_print_defs(Arena *a, Dict *dict, s8 *terms, size_t nterms)
 {
 	if (!make_dict(a, dict)) {
-		fputs("failed to allocate dict: ", stdout);
-		fwrite(dict->rom.s, 1, dict->rom.len, stdout);
+		stream_append_s8(&error_stream, s8("failed to allocate dict: "));
+		stream_append_s8(&error_stream, dict->rom);
+		stream_append_byte(&stdout_stream, '\n');
+		stream_flush(&error_stream);
 		return;
 	}
 
@@ -581,27 +594,45 @@ find_and_print_defs(Arena *a, Dict *dict, s8 *terms, size_t nterms)
 		find_and_print(terms[i], dict);
 }
 
+static b32
+get_stdin_line(Stream *buf)
+{
+	b32 result = 0;
+	for (; buf->widx < buf->cap; buf->widx++) {
+		u8 *c = buf->data + buf->widx;
+		if (!os_read(STDIN_FILENO, 1, c) || *c == (u8)-1) {
+			break;
+		} else if (*c == '\n') {
+			result = 1;
+			break;
+		}
+	}
+	return result;
+}
+
 static void
 repl(Arena *a, Dict *dicts, size_t ndicts)
 {
-	u8 t[BUFLEN];
-	s8 buf = {.s = t};
+	Stream buf = {.cap = 4096};
+	buf.data   = alloc(a, u8, buf.cap, ARENA_NO_CLEAR);
 
 	make_dicts(a, dicts, ndicts);
 
 	fsep = s8("\n");
 	for (;;) {
-		fwrite(repl_prompt.s, 1, repl_prompt.len, stdout);
-		fflush(stdout);
-		if (fgets((char *)buf.s, ARRAY_COUNT(t), stdin) == NULL)
+		stream_append_s8(&stdout_stream, repl_prompt);
+		stream_flush(&stdout_stream);
+		if (!get_stdin_line(&buf))
 			break;
-		buf = cstr_to_s8((char *)buf.s);
+		s8 trimmed = s8trim((s8){.len = buf.widx, .s = buf.data});
 		for (size_t i = 0; i < ndicts; i++)
-			find_and_print(s8trim(buf), &dicts[i]);
+			find_and_print(trimmed, &dicts[i]);
+		buf.widx = 0;
 	}
-	fwrite(repl_quit.s, 1, repl_quit.len, stdout);
+	stream_append_s8(&stdout_stream, repl_quit);
 	if (repl_quit.s[repl_quit.len - 1] != '\n')
-		fputc('\n', stdout);
+		stream_append_byte(&stdout_stream, '\n');
+	stream_flush(&stdout_stream);
 }
 
 int
@@ -614,7 +645,11 @@ main(int argc, char *argv[])
 
 	error_stream.fd   = STDERR_FILENO;
 	error_stream.cap  = 4096;
-	error_stream.data = alloc(&memory, u8, error_stream.cap, 0);
+	error_stream.data = alloc(&memory, u8, error_stream.cap, ARENA_NO_CLEAR);
+
+	stdout_stream.fd   = STDOUT_FILENO;
+	stdout_stream.cap  = 8 * MEGABYTE;
+	stdout_stream.data = alloc(&memory, u8, error_stream.cap, ARENA_NO_CLEAR);
 
 	s8 argv0 = cstr_to_s8(argv[0]);
 	for (argv++, argc--; argv[0] && argv[0][0] == '-' && argv[0][1]; argc--, argv++) {
