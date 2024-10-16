@@ -51,6 +51,8 @@ typedef struct {
 #endif
 } Arena;
 
+typedef struct { void *dirfd; } PathStream;
+
 #include "yomidict.c"
 
 #define YOMI_TOKS_PER_ENT 10
@@ -109,6 +111,7 @@ stream_append_s8(Stream *s, s8 str)
 	}
 }
 
+#ifdef _DEBUG_ARENA
 static void
 stream_append_u64(Stream *s, u64 n)
 {
@@ -118,6 +121,7 @@ stream_append_u64(Stream *s, u64 n)
 	do { *--beg = '0' + (n % 10); } while (n /= 10);
 	stream_append_s8(s, (s8){.len = end - beg, .s = beg});
 }
+#endif
 
 static void
 stream_flush(Stream *s)
@@ -366,10 +370,11 @@ intern(struct ht *t, s8 key)
 		if (!t->ents[i]) {
 			/* empty slot */
 			#ifdef _DEBUG
-			if ((u32)t->len + 1 == (u32)1<<(HT_EXP - 1))
+			if ((u32)t->len + 1 == (u32)1<<(HT_EXP - 1)) {
 				stream_append_s8(&error_stream,
 				                 s8("intern: ht exceeded 0.5 fill factor\n"));
 				stream_flush(&error_stream);
+			}
 			#endif
 			t->len++;
 			return t->ents + i;
@@ -379,30 +384,6 @@ intern(struct ht *t, s8 key)
 		}
 		/* NOTE: else relookup and try again */
 	}
-}
-
-static size_t
-count_term_banks(char *path)
-{
-	DIR *dir;
-	struct dirent *dent;
-	size_t nbanks = 0;
-
-	if (!(dir = opendir(path))) {
-		stream_append_s8(&error_stream, s8("opendir: failed to open: "));
-		stream_append_s8(&error_stream, cstr_to_s8(path));
-		die(&error_stream);
-	}
-
-	/* count term banks in path */
-	while ((dent = readdir(dir)) != NULL)
-		if (dent->d_type == DT_REG)
-			nbanks++;
-	/* remove index.json from count */
-	nbanks--;
-
-	closedir(dir);
-	return nbanks;
 }
 
 static void
@@ -499,40 +480,77 @@ cleanup:
 	a->end = start.end;
 }
 
+static PathStream
+begin_path_stream(char *dirname)
+{
+	DIR *dir;
+	if (!(dir = opendir(dirname))) {
+		stream_append_s8(&error_stream, s8("opendir: failed to open: "));
+		stream_append_s8(&error_stream, cstr_to_s8(dirname));
+		die(&error_stream);
+	}
+	return (PathStream){.dirfd = dir};
+}
+
+static s8
+get_valid_file(PathStream *ps, s8 prefix)
+{
+	s8 result = {0};
+	if (ps->dirfd) {
+		struct dirent *dent;
+		while ((dent = readdir(ps->dirfd)) != NULL) {
+			if (dent->d_type == DT_REG) {
+				b32 valid = 1;
+				for (size i = 0; i < prefix.len; i++) {
+					if (prefix.s[i] != dent->d_name[i]) {
+						valid = 0;
+						break;
+					}
+				}
+				if (valid) {
+					result = cstr_to_s8(dent->d_name);
+					/* NOTE: include the NUL terminator */
+					result.len++;
+					break;
+				}
+			}
+		}
+	}
+	return result;
+}
+
+static void
+end_path_stream(PathStream *ps)
+{
+	closedir(ps->dirfd);
+	ps->dirfd = 0;
+}
+
 static int
 make_dict(Arena *a, Dict *d)
 {
 	Arena start = *a;
 	Stream path = {.cap = 1 * MEGABYTE};
-	path.data = alloc(a, u8, path.cap, ARENA_ALLOC_END|ARENA_NO_CLEAR);
+	path.data   = alloc(a, u8, path.cap, ARENA_ALLOC_END|ARENA_NO_CLEAR);
+	d->ht.ents  = alloc(a, DictEnt *, 1 << HT_EXP, 0);
 
 	stream_append_s8(&path, prefix);
 	stream_append_s8(&path, os_path_sep);
 	stream_append_s8(&path, d->rom);
 	stream_append_byte(&path, 0);
-
-	d->ht.ents = alloc(a, DictEnt *, 1 << HT_EXP, 0);
-
-	size_t nbanks;
-	if ((nbanks = count_term_banks((char *)path.data)) == 0) {
-		stream_append_s8(&error_stream, s8("no term banks found: "));
-		stream_append_s8(&error_stream, (s8){.len = path.widx - 1, .s = path.data});
-		stream_append_byte(&error_stream, '\n');
-		stream_flush(&error_stream);
-		return 0;
-	}
+	PathStream ps = begin_path_stream((char *)path.data);
 
 	path.widx -= 1;
 	stream_append_s8(&path, os_path_sep);
-	stream_append_s8(&path, s8("term_bank_"));
 	i32 start_widx = path.widx;
 
-	for (size_t i = 1; i <= nbanks; i++) {
+	s8 fn_pre = s8("term");
+	for (s8 fn = get_valid_file(&ps, fn_pre); fn.len; fn = get_valid_file(&ps, fn_pre)) {
 		path.widx = start_widx;
-		stream_append_u64(&path, i);
-		stream_append_s8(&path, s8(".json\0"));
+		stream_append_s8(&path, fn);
 		parse_term_bank(a, &d->ht, (char *)path.data);
 	}
+	end_path_stream(&ps);
 
 	/* NOTE: clear temporary allocations */
 	a->end = start.end;
