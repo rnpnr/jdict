@@ -84,19 +84,22 @@ os_write(iptr file, s8 raw)
 }
 
 static PathStream
-os_begin_path_stream(char *directory)
+os_begin_path_stream(Stream *dir_name)
 {
-	DIR *dir;
-	if (!(dir = opendir(directory))) {
+	stream_append_byte(dir_name, 0);
+	DIR *dir = opendir((char *)dir_name->data);
+	dir_name->widx--;
+	if (!dir) {
 		stream_append_s8(&error_stream, s8("opendir: failed to open: "));
-		stream_append_s8(&error_stream, cstr_to_s8(directory));
+		stream_append_s8(&error_stream, (s8){.len = dir_name->widx, .s = dir_name->data});
 		die(&error_stream);
 	}
-	return (PathStream){.dirfd = dir};
+	stream_append_byte(dir_name, '/');
+	return (PathStream){.dir_name = dir_name, .dirfd = dir};
 }
 
 static s8
-os_get_valid_file(PathStream *ps, s8 match_prefix)
+os_get_valid_file(PathStream *ps, s8 match_prefix, Arena *a, u32 arena_flags)
 {
 	s8 result = {0};
 	if (ps->dirfd) {
@@ -111,9 +114,13 @@ os_get_valid_file(PathStream *ps, s8 match_prefix)
 					}
 				}
 				if (valid) {
-					result = cstr_to_s8(dent->d_name);
-					/* NOTE: include the NUL terminator */
-					result.len++;
+					Stream dir_name = *ps->dir_name;
+					s8 d_name = cstr_to_s8(dent->d_name);
+					/* NOTE: include NUL */
+					d_name.len++;
+					stream_append_s8(&dir_name, d_name);
+					result = os_read_whole_file((char *)dir_name.data, a,
+					                            arena_flags);
 					break;
 				}
 			}

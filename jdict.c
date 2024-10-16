@@ -46,7 +46,10 @@ typedef struct {
 #endif
 } Arena;
 
-typedef struct { void *dirfd; } PathStream;
+typedef struct {
+	Stream *dir_name;
+	void   *dirfd;
+} PathStream;
 
 #include "yomidict.c"
 
@@ -87,8 +90,8 @@ static void os_write(iptr, s8);
 static s8   os_read_whole_file(char *, Arena *, u32);
 static b32  os_read_stdin(u8 *, size);
 
-static PathStream os_begin_path_stream(char *);
-static s8         os_get_valid_file(PathStream *, s8);
+static PathStream os_begin_path_stream(Stream *);
+static s8         os_get_valid_file(PathStream *, s8, Arena *, u32);
 static void       os_end_path_stream(PathStream *);
 
 static Stream error_stream;
@@ -322,11 +325,8 @@ intern(struct ht *t, s8 key)
 }
 
 static void
-parse_term_bank(Arena *a, struct ht *ht, char *tbank)
+parse_term_bank(Arena *a, struct ht *ht, s8 data)
 {
-	Arena start = *a;
-	s8 data     = os_read_whole_file(tbank, a, ARENA_ALLOC_END);
-
 	/* allocate tokens */
 	size ntoks = (1 << HT_EXP) * YOMI_TOKS_PER_ENT + 1;
 	YomiTok *toks = alloc(a, YomiTok, ntoks, ARENA_ALLOC_END|ARENA_NO_CLEAR);
@@ -408,14 +408,12 @@ parse_term_bank(Arena *a, struct ht *ht, char *tbank)
 
 cleanup:
 	stream_flush(&error_stream);
-	/* NOTE: clear temporary allocations */
-	a->end = start.end;
 }
 
 static int
 make_dict(Arena *a, Dict *d)
 {
-	Arena start = *a;
+	u8 *starting_arena_end = a->end;
 	Stream path = {.cap = 1 * MEGABYTE};
 	path.data   = alloc(a, u8, path.cap, ARENA_ALLOC_END|ARENA_NO_CLEAR);
 	d->ht.ents  = alloc(a, DictEnt *, 1 << HT_EXP, 0);
@@ -423,23 +421,20 @@ make_dict(Arena *a, Dict *d)
 	stream_append_s8(&path, prefix);
 	stream_append_s8(&path, os_path_sep);
 	stream_append_s8(&path, d->rom);
-	stream_append_byte(&path, 0);
-	PathStream ps = os_begin_path_stream((char *)path.data);
+	PathStream ps = os_begin_path_stream(&path);
 
-	path.widx -= 1;
-	stream_append_s8(&path, os_path_sep);
-	i32 start_widx = path.widx;
-
+	u8 *arena_end = a->end;
 	s8 fn_pre = s8("term");
-	for (s8 fn = os_get_valid_file(&ps, fn_pre); fn.len; fn = os_get_valid_file(&ps, fn_pre)) {
-		path.widx = start_widx;
-		stream_append_s8(&path, fn);
-		parse_term_bank(a, &d->ht, (char *)path.data);
+	for (s8 filedata = os_get_valid_file(&ps, fn_pre, a, ARENA_ALLOC_END);
+	     filedata.len;
+	     filedata = os_get_valid_file(&ps, fn_pre, a, ARENA_ALLOC_END))
+	{
+		parse_term_bank(a, &d->ht, filedata);
+		a->end = arena_end;
 	}
 	os_end_path_stream(&ps);
 
-	/* NOTE: clear temporary allocations */
-	a->end = start.end;
+	a->end = starting_arena_end;
 
 	return 1;
 }
