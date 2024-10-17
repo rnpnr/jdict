@@ -224,16 +224,16 @@ s8_dup(Arena *a, s8 old)
 	return result;
 }
 
-static i32
-s8_cmp(s8 a, s8 b)
+static b32
+s8_equal(s8 a, s8 b)
 {
-	if (a.len == 0 || a.len != b.len)
-		return a.len - b.len;
 	i32 result = 0;
+	if (a.len != b.len)
+		return 0;
 	/* NOTE: we assume short strings in this program */
 	for (size i = 0; i < a.len; i++)
 		result += b.s[i] - a.s[i];
-	return result;
+	return result == 0;
 }
 
 static s8
@@ -316,7 +316,7 @@ intern(struct ht *t, s8 key)
 			#endif
 			t->len++;
 			return t->ents + i;
-		} else if (!s8_cmp(t->ents[i]->term, key)) {
+		} else if (s8_equal(t->ents[i]->term, key)) {
 			/* found; return the stored instance */
 			return t->ents + i;
 		}
@@ -385,7 +385,7 @@ parse_term_bank(Arena *a, struct ht *ht, s8 data)
 			*n         = alloc(a, DictEnt, 1, 0);
 			(*n)->term = s8_dup(a, mem_term);
 		} else {
-			if (s8_cmp((*n)->term, mem_term)) {
+			if (!s8_equal((*n)->term, mem_term)) {
 				stream_append_s8(&error_stream, s8("hash collision: "));
 				stream_append_s8(&error_stream, mem_term);
 				stream_append_byte(&error_stream, '\t');
@@ -461,12 +461,12 @@ find_and_print(s8 term, Dict *d)
 {
 	DictEnt *ent = find_ent(term, d);
 
-	if (!ent || s8_cmp(term, ent->term))
+	if (!ent || !s8_equal(term, ent->term))
 		return;
 
-	b32 new_line_sep = !s8_cmp(fsep, s8("\n"));
+	b32 print_for_readability = s8_equal(fsep, s8("\n"));
 	for (DictDef *def = ent->def; def; def = def->next) {
-		if (new_line_sep)
+		if (print_for_readability)
 			def->text = unescape(def->text);
 		/* NOTE: some dictionaries are "hand-made" by idiots and have definitions
 		 * with only white space in them */
@@ -560,7 +560,7 @@ jdict(Arena *a, i32 argc, char *argv[])
 				usage(argv0);
 			s8 dname = cstr_to_s8(argv[1]);
 			for (u32 j = 0; j < ARRAY_COUNT(default_dict_map); j++) {
-				if (s8_cmp(dname, default_dict_map[j].rom) == 0) {
+				if (s8_equal(dname, default_dict_map[j].rom)) {
 					dicts = &default_dict_map[j];
 					ndicts++;
 					break;
