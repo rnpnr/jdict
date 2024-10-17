@@ -147,7 +147,8 @@ os_get_valid_file(PathStream *ps, s8 match_prefix, Arena *a, u32 arena_flags)
 	if (lds) {
 		for (;;) {
 			if (lds->buf_pos >= lds->buf_end) {
-				u64 ret = syscall3(SYS_getdents, lds->fd, (iptr)lds->buf, sizeof(lds->buf));
+				u64 ret = syscall3(SYS_getdents64, lds->fd, (iptr)lds->buf,
+				                   sizeof(lds->buf));
 				if (ret > -4096UL) {
 					stream_append_s8(&error_stream, s8("os_get_valid_file: SYS_getdents"));
 					die(&error_stream);
@@ -158,7 +159,7 @@ os_get_valid_file(PathStream *ps, s8 match_prefix, Arena *a, u32 arena_flags)
 				lds->buf_pos = 0;
 			}
 			u16  record_len = *(u16 *)(lds->buf + lds->buf_pos + DIRENT_RECLEN_OFF);
-			u8   type       = lds->buf[lds->buf_pos + record_len - 1];
+			u8   type       = lds->buf[lds->buf_pos + DIRENT_TYPE_OFF];
 			/* NOTE: technically this contains extra NULs but it doesn't matter
 			 * for this purpose. We need NUL terminated to call SYS_read */
 			s8   name       = {.len = record_len - 2 - DIRENT_NAME_OFF,

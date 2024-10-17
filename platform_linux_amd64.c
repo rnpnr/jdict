@@ -8,14 +8,14 @@
 #endif
 #endif
 
-#define SYS_read     0
-#define SYS_write    1
-#define SYS_open     2
-#define SYS_close    3
-#define SYS_stat     4
-#define SYS_mmap     9
-#define SYS_exit     60
-#define SYS_getdents 78
+#define SYS_read       0
+#define SYS_write      1
+#define SYS_open       2
+#define SYS_close      3
+#define SYS_stat       4
+#define SYS_mmap       9
+#define SYS_exit       60
+#define SYS_getdents64 217
 
 #define PAGESIZE 4096
 
@@ -23,7 +23,8 @@
 #define STAT_SIZE_OFF 48
 
 #define DIRENT_RECLEN_OFF 16
-#define DIRENT_NAME_OFF   18
+#define DIRENT_TYPE_OFF   18
+#define DIRENT_NAME_OFF   19
 
 #include "platform_linux.c"
 
