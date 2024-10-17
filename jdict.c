@@ -465,6 +465,7 @@ find_and_print(s8 term, Dict *d)
 		return;
 
 	b32 print_for_readability = s8_equal(fsep, s8("\n"));
+	b32 printed_header        = 0;
 	for (DictDef *def = ent->def; def; def = def->next) {
 		if (print_for_readability)
 			def->text = unescape(def->text);
@@ -472,12 +473,22 @@ find_and_print(s8 term, Dict *d)
 		 * with only white space in them */
 		def->text = s8trim(def->text);
 		if (def->text.len) {
-			stream_append_s8(&stdout_stream, d->name);
+			if (!print_for_readability) {
+				stream_append_s8(&stdout_stream, d->name);
+			} else if (!printed_header) {
+				stream_append_s8(&stdout_stream, s8("\x1b[36;1m"));
+				stream_append_s8(&stdout_stream, d->name);
+				stream_append_s8(&stdout_stream, s8("\x1b[0m"));
+				printed_header = 1;
+			}
+
 			stream_append_s8(&stdout_stream, fsep);
 			stream_append_s8(&stdout_stream, def->text);
 			stream_append_byte(&stdout_stream, '\n');
 		}
 	}
+	if (print_for_readability && printed_header)
+		stream_append_byte(&stdout_stream, '\n');
 	stream_flush(&stdout_stream);
 }
 
