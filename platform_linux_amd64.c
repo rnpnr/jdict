@@ -31,7 +31,7 @@ static i64
 syscall1(i64 n, i64 a1)
 {
 	i64 result;
-	asm ("syscall"
+	asm volatile ("syscall"
 		: "=a"(result)
 		: "a"(n), "D"(a1)
 		: "rcx", "r11", "memory"
@@ -43,7 +43,7 @@ static i64
 syscall2(i64 n, i64 a1, i64 a2)
 {
 	i64 result;
-	asm ("syscall"
+	asm volatile ("syscall"
 		: "=a"(result)
 		: "a"(n), "D"(a1), "S"(a2)
 		: "rcx", "r11", "memory"
@@ -55,7 +55,7 @@ static i64
 syscall3(i64 n, i64 a1, i64 a2, i64 a3)
 {
 	i64 result;
-	asm ("syscall"
+	asm volatile ("syscall"
 		: "=a"(result)
 		: "a"(n), "D"(a1), "S"(a2), "d"(a3)
 		: "rcx", "r11", "memory"
@@ -70,7 +70,7 @@ syscall6(i64 n, i64 a1, i64 a2, i64 a3, i64 a4, i64 a5, i64 a6)
 	register i64 r10 asm("r10") = a4;
 	register i64 r8  asm("r8")  = a5;
 	register i64 r9  asm("r9")  = a6;
-	asm ("syscall"
+	asm volatile ("syscall"
 		: "=a"(result)
 		: "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10), "r"(r8), "r"(r9)
 		: "rcx", "r11", "memory"
