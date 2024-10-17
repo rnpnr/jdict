@@ -73,14 +73,15 @@ os_read_whole_file(char *file, Arena *a, u32 arena_flags)
 	return result;
 }
 
-static void
+static b32
 os_write(iptr file, s8 raw)
 {
 	while (raw.len) {
 		size r = write(file, raw.s, raw.len);
-		if (r < 0) os_exit(1);
+		if (r < 0) return 0;
 		raw = s8_cut_head(raw, r);
 	}
+	return 1;
 }
 
 static PathStream

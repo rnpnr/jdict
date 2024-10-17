@@ -39,14 +39,15 @@ os_exit(i32 code)
 	__builtin_unreachable();
 }
 
-static void
+static b32
 os_write(iptr fd, s8 raw)
 {
 	while (raw.len) {
 		size r = syscall3(SYS_write, fd, (i64)raw.s, raw.len);
-		if (r < 0) os_exit(1);
+		if (r < 0) return 0;
 		raw = s8_cut_head(raw, r);
 	}
+	return 1;
 }
 
 static b32
@@ -146,8 +147,7 @@ os_get_valid_file(PathStream *ps, s8 match_prefix, Arena *a, u32 arena_flags)
 	if (lds) {
 		for (;;) {
 			if (lds->buf_pos >= lds->buf_end) {
-				u64 ret = syscall3(SYS_getdents, lds->fd, (iptr)lds->buf,
-				                      sizeof(lds->buf));
+				u64 ret = syscall3(SYS_getdents, lds->fd, (iptr)lds->buf, sizeof(lds->buf));
 				if (ret > -4096UL) {
 					stream_append_s8(&error_stream, s8("os_get_valid_file: SYS_getdents"));
 					die(&error_stream);

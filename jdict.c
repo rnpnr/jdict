@@ -84,9 +84,9 @@ typedef struct {
 
 static void __attribute__((noreturn)) os_exit(i32);
 
-static void os_write(iptr, s8);
-static s8   os_read_whole_file(char *, Arena *, u32);
-static b32  os_read_stdin(u8 *, size);
+static b32 os_write(iptr, s8);
+static s8  os_read_whole_file(char *, Arena *, u32);
+static b32 os_read_stdin(u8 *, size);
 
 static PathStream os_begin_path_stream(Stream *, Arena *, u32);
 static s8         os_get_valid_file(PathStream *, s8, Arena *, u32);
@@ -96,9 +96,21 @@ static Stream error_stream;
 static Stream stdout_stream;
 
 static void
+stream_flush(Stream *s)
+{
+	if (s->fd <= 0) {
+		s->errors = 1;
+	} else if (s->widx) {
+		s->errors = !os_write(s->fd, (s8){.len = s->widx, .s = s->data});
+		if (!s->errors) s->widx = 0;
+	}
+}
+
+static void
 stream_append_byte(Stream *s, u8 b)
 {
-	s->errors |= s->widx + 1 > s->cap;
+	if (s->widx + 1 > s->cap)
+		stream_flush(s);
 	if (!s->errors)
 		s->data[s->widx++] = b;
 }
@@ -106,11 +118,20 @@ stream_append_byte(Stream *s, u8 b)
 static void
 stream_append_s8(Stream *s, s8 str)
 {
+	if (str.len > s->cap - s->widx)
+		stream_flush(s);
 	s->errors |= (s->cap - s->widx) < str.len;
 	if (!s->errors) {
 		for (size i = 0; i < str.len; i++)
 			s->data[s->widx++] = str.s[i];
 	}
+}
+
+static void
+stream_ensure_newline(Stream *s)
+{
+	if (s->widx && s->data[s->widx - 1] != '\n')
+		stream_append_byte(s, '\n');
 }
 
 #ifdef _DEBUG_ARENA
@@ -125,16 +146,6 @@ stream_append_u64(Stream *s, u64 n)
 }
 #endif
 
-static void
-stream_flush(Stream *s)
-{
-	if (s->widx) {
-		os_write(s->fd, (s8){.len = s->widx, .s = s->data});
-		s->widx   = 0;
-		s->errors = 0;
-	}
-}
-
 static s8
 cstr_to_s8(char *cstr)
 {
@@ -146,8 +157,7 @@ cstr_to_s8(char *cstr)
 static void __attribute__((noreturn))
 die(Stream *s)
 {
-	if (s->data[s->widx - 1] != '\n')
-		stream_append_byte(s, '\n');
+	stream_ensure_newline(s);
 	stream_flush(s);
 	os_exit(1);
 }
@@ -206,16 +216,9 @@ usage(s8 argv0)
 }
 
 static s8
-s8_alloc(Arena *a, size len)
-{
-	s8 result = {.len = len, .s = alloc(a, u8, len, ARENA_NO_CLEAR)};
-	return result;
-}
-
-static s8
 s8_dup(Arena *a, s8 old)
 {
-	s8 result = s8_alloc(a, old.len);
+	s8 result = {.len = old.len, .s = alloc(a, u8, old.len, ARENA_NO_CLEAR)};
 	for (size i = 0; i < old.len; i++)
 		result.s[i] = old.s[i];
 	return result;
@@ -309,7 +312,6 @@ intern(struct ht *t, s8 key)
 			if ((u32)t->len + 1 == (u32)1<<(HT_EXP - 1)) {
 				stream_append_s8(&error_stream,
 				                 s8("intern: ht exceeded 0.5 fill factor\n"));
-				stream_flush(&error_stream);
 			}
 			#endif
 			t->len++;
@@ -369,11 +371,9 @@ parse_term_bank(Arena *a, struct ht *ht, s8 data)
 
 		/* check if entry was valid */
 		if (tdefs == NULL || tstr == NULL) {
-			stream_append_s8(&error_stream, s8("parse_term_bank: "));
-			if (!tdefs)
-				stream_append_s8(&error_stream, s8("tdefs"));
-			else
-				stream_append_s8(&error_stream, s8("tstr"));
+			stream_append_s8(&error_stream, s8("parse_term_bank: invalid entry: got "));
+			if (!tdefs) stream_append_s8(&error_stream, s8("tdefs"));
+			else        stream_append_s8(&error_stream, s8("tstr"));
 			stream_append_s8(&error_stream, s8(" == NULL\n"));
 			break;
 		}
@@ -391,7 +391,6 @@ parse_term_bank(Arena *a, struct ht *ht, s8 data)
 				stream_append_byte(&error_stream, '\t');
 				stream_append_s8(&error_stream, (*n)->term);
 				stream_append_byte(&error_stream, '\n');
-				stream_flush(&error_stream);
 			}
 		}
 
@@ -405,7 +404,7 @@ parse_term_bank(Arena *a, struct ht *ht, s8 data)
 	}
 
 cleanup:
-	stream_flush(&error_stream);
+	stream_ensure_newline(&error_stream);
 }
 
 static int
@@ -444,7 +443,7 @@ make_dicts(Arena *a, Dict *dicts, size_t ndicts)
 		if (!make_dict(a, &dicts[i])) {
 			stream_append_s8(&error_stream, s8("make_dict failed for: "));
 			stream_append_s8(&error_stream, dicts[i].rom);
-			die(&error_stream);
+			stream_append_byte(&error_stream, '\n');
 		}
 	}
 }
@@ -465,15 +464,21 @@ find_and_print(s8 term, Dict *d)
 	if (!ent || s8_cmp(term, ent->term))
 		return;
 
+	b32 new_line_sep = !s8_cmp(fsep, s8("\n"));
 	for (DictDef *def = ent->def; def; def = def->next) {
-		if (!s8_cmp(fsep, s8("\n")))
+		if (new_line_sep)
 			def->text = unescape(def->text);
-		stream_append_s8(&stdout_stream, d->name);
-		stream_append_s8(&stdout_stream, fsep);
-		stream_append_s8(&stdout_stream, def->text);
-		stream_append_byte(&stdout_stream, '\n');
-		stream_flush(&stdout_stream);
+		/* NOTE: some dictionaries are "hand-made" by idiots and have definitions
+		 * with only white space in them */
+		def->text = s8trim(def->text);
+		if (def->text.len) {
+			stream_append_s8(&stdout_stream, d->name);
+			stream_append_s8(&stdout_stream, fsep);
+			stream_append_s8(&stdout_stream, def->text);
+			stream_append_byte(&stdout_stream, '\n');
+		}
 	}
+	stream_flush(&stdout_stream);
 }
 
 static void
@@ -483,7 +488,6 @@ find_and_print_defs(Arena *a, Dict *dict, s8 *terms, size_t nterms)
 		stream_append_s8(&error_stream, s8("failed to allocate dict: "));
 		stream_append_s8(&error_stream, dict->rom);
 		stream_append_byte(&stdout_stream, '\n');
-		stream_flush(&error_stream);
 		return;
 	}
 
@@ -527,9 +531,6 @@ repl(Arena *a, Dict *dicts, size_t ndicts)
 		buf.widx = 0;
 	}
 	stream_append_s8(&stdout_stream, repl_quit);
-	if (repl_quit.s[repl_quit.len - 1] != '\n')
-		stream_append_byte(&stdout_stream, '\n');
-	stream_flush(&stdout_stream);
 }
 
 static i32
@@ -602,9 +603,13 @@ jdict(Arena *a, i32 argc, char *argv[])
 	stream_append_u64(&error_stream, memory.min_capacity_remaining);
 	stream_append_s8(&error_stream, s8("\nremaining arena capacity: "));
 	stream_append_u64(&error_stream, memory.end - memory.beg);
-	stream_append_byte(&error_stream, '\n');
-	stream_flush(&error_stream);
 #endif
+
+	stream_ensure_newline(&error_stream);
+	stream_flush(&error_stream);
+
+	stream_ensure_newline(&stdout_stream);
+	stream_flush(&stdout_stream);
 
 	return 0;
 }
