@@ -2,6 +2,7 @@
 cflags="-march=native -O3 -std=c99 -Wall -Wextra -fno-builtin"
 #cflags="${cflags} -fproc-stat-report"
 #cflags="${cflags} -Rpass-missed=.*"
+#cflags="${cflags} -fsanitize=address,undefined"
 ldflags="-static"
 
 cc=${CC:-cc}

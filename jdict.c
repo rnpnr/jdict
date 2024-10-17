@@ -181,7 +181,7 @@ static void *
 alloc_(Arena *a, size len, size align, size count, u32 flags)
 {
 	size padding;
-	if (flags & ARENA_ALLOC_END) padding = -(uintptr_t)a->end & (align - 1);
+	if (flags & ARENA_ALLOC_END) padding =  (uintptr_t)a->end & (align - 1);
 	else                         padding = -(uintptr_t)a->beg & (align - 1);
 
 	size available = a->end - a->beg - padding;

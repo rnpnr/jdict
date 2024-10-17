@@ -200,7 +200,7 @@ linux_main(i32 argc, char *argv[], char *envp[])
 	stdout_stream.cap  = 8 * MEGABYTE;
 	stdout_stream.data = alloc(&memory, u8, error_stream.cap, ARENA_NO_CLEAR);
 
-	jdict(&memory, argc, argv);
+	i32 result = jdict(&memory, argc, argv);
 
-	os_exit(0);
+	os_exit(result);
 }
