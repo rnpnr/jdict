@@ -84,8 +84,10 @@ os_write(iptr file, s8 raw)
 }
 
 static PathStream
-os_begin_path_stream(Stream *dir_name)
+os_begin_path_stream(Stream *dir_name, Arena *a, u32 arena_flags)
 {
+	(void)a; (void)arena_flags;
+
 	stream_append_byte(dir_name, 0);
 	DIR *dir = opendir((char *)dir_name->data);
 	dir_name->widx--;

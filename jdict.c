@@ -7,6 +7,7 @@ typedef uint64_t  u64;
 typedef int32_t   i32;
 typedef uint32_t  u32;
 typedef uint32_t  b32;
+typedef uint16_t  u16;
 typedef ptrdiff_t size;
 typedef ptrdiff_t iptr;
 
@@ -90,7 +91,7 @@ static void os_write(iptr, s8);
 static s8   os_read_whole_file(char *, Arena *, u32);
 static b32  os_read_stdin(u8 *, size);
 
-static PathStream os_begin_path_stream(Stream *);
+static PathStream os_begin_path_stream(Stream *, Arena *, u32);
 static s8         os_get_valid_file(PathStream *, s8, Arena *, u32);
 static void       os_end_path_stream(PathStream *);
 
@@ -421,7 +422,7 @@ make_dict(Arena *a, Dict *d)
 	stream_append_s8(&path, prefix);
 	stream_append_s8(&path, os_path_sep);
 	stream_append_s8(&path, d->rom);
-	PathStream ps = os_begin_path_stream(&path);
+	PathStream ps = os_begin_path_stream(&path, a, ARENA_ALLOC_END);
 
 	u8 *arena_end = a->end;
 	s8 fn_pre = s8("term");

@@ -12,4 +12,11 @@ src=platform_posix.c
 [ $debug ] && cflags="$cflags -O0 -ggdb -D_DEBUG"
 [ ! $debug ] && ldflags="-s $ldflags"
 
+case $(uname -sm) in
+"Linux x86_64")
+	src=platform_linux_amd64.c
+	cflags="${cflags} -nostdlib -ffreestanding -fno-stack-protector -Wl,--gc-sections"
+	;;
+esac
+
 ${cc} $cflags $ldflags $src -o jdict
