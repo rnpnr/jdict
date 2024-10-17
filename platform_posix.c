@@ -109,18 +109,19 @@ os_get_valid_file(PathStream *ps, s8 match_prefix, Arena *a, u32 arena_flags)
 		while ((dent = readdir(ps->dirfd)) != NULL) {
 			if (dent->d_type == DT_REG) {
 				b32 valid = 1;
+				/* NOTE: technically this contains extra NULs but it doesn't matter
+				 * for this purpose. We need NUL terminated to call read() */
+				s8 name = {.len = dent->d_reclen - 2 - offsetof(struct dirent, d_name),
+				           .s   = (u8 *)dent->d_name};
 				for (size i = 0; i < match_prefix.len; i++) {
-					if (match_prefix.s[i] != dent->d_name[i]) {
+					if (match_prefix.s[i] != name.s[i]) {
 						valid = 0;
 						break;
 					}
 				}
 				if (valid) {
 					Stream dir_name = *ps->dir_name;
-					s8 d_name = cstr_to_s8(dent->d_name);
-					/* NOTE: include NUL */
-					d_name.len++;
-					stream_append_s8(&dir_name, d_name);
+					stream_append_s8(&dir_name, name);
 					result = os_read_whole_file((char *)dir_name.data, a,
 					                            arena_flags);
 					break;

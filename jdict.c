@@ -56,9 +56,6 @@ typedef struct {
 
 #define YOMI_TOKS_PER_ENT 10
 
-/* buffer length for interactive mode */
-#define BUFLEN 256
-
 /* Number of hash table slots (1 << HT_EXP) */
 #define HT_EXP 20
 

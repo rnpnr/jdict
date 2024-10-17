@@ -29,10 +29,7 @@ typedef struct {
 __attribute((section(".text.memset")))
 void *memset(void *d, int c, size_t n)
 {
-	u8 *bytes = d;
-	for (size_t i = 0; i < n; i++)
-		bytes[i] = c;
-	return d;
+	return mem_clear(d, c, n);
 }
 
 static void
