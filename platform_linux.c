@@ -1,6 +1,8 @@
 /* See LICENSE for license details. */
 #define os_path_sep s8("/")
 
+#define NULL ((void *)0)
+
 #include "jdict.c"
 
 #define PROT_READ     0x01
@@ -27,7 +29,7 @@ typedef struct {
 
 /* NOTE: necessary garbage required by GCC/CLANG even when -nostdlib is used */
 __attribute((section(".text.memset")))
-void *memset(void *d, int c, size_t n)
+void *memset(void *d, int c, usize n)
 {
 	return mem_clear(d, c, n);
 }

@@ -1,4 +1,14 @@
 /* See LICENSE for license details. */
+typedef unsigned char  u8;
+typedef signed   long  i64;
+typedef unsigned long  u64;
+typedef signed   int   i32;
+typedef unsigned int   u32;
+typedef unsigned int   b32;
+typedef unsigned short u16;
+typedef signed   long  size;
+typedef unsigned long  usize;
+typedef signed   long  iptr;
 
 #ifndef asm
 #ifdef __asm

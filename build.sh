@@ -16,7 +16,7 @@ src=platform_posix.c
 case $(uname -sm) in
 "Linux x86_64")
 	src=platform_linux_amd64.c
-	cflags="${cflags} -nostdlib -ffreestanding -fno-stack-protector -Wl,--gc-sections"
+	cflags="${cflags} -nostdinc -nostdlib -ffreestanding -fno-stack-protector -Wl,--gc-sections"
 	;;
 esac
 

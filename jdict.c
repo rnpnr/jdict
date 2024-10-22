@@ -1,16 +1,4 @@
 /* See LICENSE for license details. */
-#include <stdint.h>
-#include <stddef.h>
-typedef uint8_t   u8;
-typedef int64_t   i64;
-typedef uint64_t  u64;
-typedef int32_t   i32;
-typedef uint32_t  u32;
-typedef uint32_t  b32;
-typedef uint16_t  u16;
-typedef ptrdiff_t size;
-typedef ptrdiff_t iptr;
-
 #ifdef _DEBUG
 #define ASSERT(c) do { __asm("int3; nop"); } while (0)
 #else
@@ -181,8 +169,8 @@ static void *
 alloc_(Arena *a, size len, size align, size count, u32 flags)
 {
 	size padding;
-	if (flags & ARENA_ALLOC_END) padding =  (uintptr_t)a->end & (align - 1);
-	else                         padding = -(uintptr_t)a->beg & (align - 1);
+	if (flags & ARENA_ALLOC_END) padding =  (usize)a->end & (align - 1);
+	else                         padding = -(usize)a->beg & (align - 1);
 
 	size available = a->end - a->beg - padding;
 	if (available <= 0 || available / len <= count)
@@ -355,7 +343,8 @@ parse_term_bank(Arena *a, struct ht *ht, s8 data)
 			continue;
 
 		YomiTok *tstr = NULL, *tdefs = NULL;
-		for (size_t j = 1; j < base_tok->len; j++) {
+		for (usize j = 1; j < base_tok->len; j++) {
+
 			switch (base_tok[j].type) {
 			case YOMI_STR:
 				if (tstr == NULL)
@@ -394,7 +383,7 @@ parse_term_bank(Arena *a, struct ht *ht, s8 data)
 			}
 		}
 
-		for (size_t i = 1; i <= tdefs->len; i++) {
+		for (usize i = 1; i <= tdefs->len; i++) {
 			DictDef *def = alloc(a, DictDef, 1, ARENA_NO_CLEAR);
 			def->text = s8_dup(a, (s8){.len = tdefs[i].end - tdefs[i].start,
 			                           .s = data.s + tdefs[i].start});
@@ -437,9 +426,9 @@ make_dict(Arena *a, Dict *d)
 }
 
 static void
-make_dicts(Arena *a, Dict *dicts, size_t ndicts)
+make_dicts(Arena *a, Dict *dicts, u32 ndicts)
 {
-	for (size_t i = 0; i < ndicts; i++) {
+	for (u32 i = 0; i < ndicts; i++) {
 		if (!make_dict(a, &dicts[i])) {
 			stream_append_s8(&error_stream, s8("make_dict failed for: "));
 			stream_append_s8(&error_stream, dicts[i].rom);
@@ -493,7 +482,7 @@ find_and_print(s8 term, Dict *d)
 }
 
 static void
-find_and_print_defs(Arena *a, Dict *dict, s8 *terms, size_t nterms)
+find_and_print_defs(Arena *a, Dict *dict, s8 *terms, u32 nterms)
 {
 	if (!make_dict(a, dict)) {
 		stream_append_s8(&error_stream, s8("failed to allocate dict: "));
@@ -502,7 +491,7 @@ find_and_print_defs(Arena *a, Dict *dict, s8 *terms, size_t nterms)
 		return;
 	}
 
-	for (size_t i = 0; i < nterms; i++)
+	for (u32 i = 0; i < nterms; i++)
 		find_and_print(terms[i], dict);
 }
 
@@ -523,7 +512,7 @@ get_stdin_line(Stream *buf)
 }
 
 static void
-repl(Arena *a, Dict *dicts, size_t ndicts)
+repl(Arena *a, Dict *dicts, u32 ndicts)
 {
 	Stream buf = {.cap = 4096};
 	buf.data   = alloc(a, u8, buf.cap, ARENA_NO_CLEAR);
@@ -537,7 +526,7 @@ repl(Arena *a, Dict *dicts, size_t ndicts)
 		if (!get_stdin_line(&buf))
 			break;
 		s8 trimmed = s8trim((s8){.len = buf.widx, .s = buf.data});
-		for (size_t i = 0; i < ndicts; i++)
+		for (u32 i = 0; i < ndicts; i++)
 			find_and_print(trimmed, &dicts[i]);
 		buf.widx = 0;
 	}
