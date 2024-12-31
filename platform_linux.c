@@ -24,7 +24,7 @@ typedef __attribute__((aligned(16))) u8 stat_buffer[144];
 #define DIRENT_BUF_MEMBER(db, t, off) (*(t *)((u8 *)(db) + off))
 #define DIRENT_RECLEN(db) DIRENT_BUF_MEMBER(db, u16,    16)
 #define DIRENT_TYPE(db)   DIRENT_BUF_MEMBER(db, u8,     18)
-#define DIRENT_NAME(db)   DIRENT_BUF_MEMBER(db, char *, 19)
+#define DIRENT_NAME(db)   (char *)((db) + 19)
 
 static i64 syscall1(i64, i64);
 static i64 syscall2(i64, i64, i64);
