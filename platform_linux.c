@@ -123,7 +123,7 @@ os_new_arena(size requested_size)
 	return result;
 }
 
-static PathStream
+static iptr
 os_begin_path_stream(Stream *dir_name, Arena *a, u32 arena_flags)
 {
 	stream_append_byte(dir_name, 0);
@@ -131,29 +131,28 @@ os_begin_path_stream(Stream *dir_name, Arena *a, u32 arena_flags)
 
 	if (fd > -4096UL) {
 		stream_append_s8(&error_stream, s8("os_begin_path_stream: failed to open: "));
-		stream_append_s8(&error_stream, (s8){.len = dir_name->widx, .s = dir_name->data});
+		stream_append_s8(&error_stream, (s8){.len = dir_name->widx - 1, .s = dir_name->data});
 		die(&error_stream);
 	}
 
 	LinuxDirectoryStream *lds = alloc(a, LinuxDirectoryStream, 1, arena_flags);
 	lds->fd = fd;
-	return (PathStream){.dir_name = dir_name, .dirfd = lds};
+	return (iptr)lds;
 }
 
 static void
-os_end_path_stream(PathStream *ps)
+os_end_path_stream(iptr path_stream)
 {
-	LinuxDirectoryStream *lds = ps->dirfd;
+	LinuxDirectoryStream *lds = (LinuxDirectoryStream *)path_stream;
 	syscall1(SYS_close, (iptr)lds->fd);
-	ps->dirfd = 0;
 }
 
 static s8
-os_get_valid_file(PathStream *ps, s8 match_prefix, Arena *a, u32 arena_flags)
+os_get_valid_file(iptr path_stream, s8 match_prefix, Arena *a, u32 arena_flags)
 {
 	s8 result = {0};
-	LinuxDirectoryStream *lds = ps->dirfd;
-	if (lds) {
+	if (path_stream) {
+		LinuxDirectoryStream *lds = (LinuxDirectoryStream *)path_stream;
 		for (;;) {
 			if (lds->buf_pos >= lds->buf_end) {
 				u64 ret = syscall3(SYS_getdents64, lds->fd, (iptr)lds->buf,
@@ -169,22 +168,18 @@ os_get_valid_file(PathStream *ps, s8 match_prefix, Arena *a, u32 arena_flags)
 			}
 			u16  record_len = *(u16 *)(lds->buf + lds->buf_pos + DIRENT_RECLEN_OFF);
 			u8   type       = lds->buf[lds->buf_pos + DIRENT_TYPE_OFF];
-			/* NOTE: technically this contains extra NULs but it doesn't matter
-			 * for this purpose. We need NUL terminated to call SYS_read */
-			s8   name       = {.len = record_len - 2 - DIRENT_NAME_OFF,
-			                   .s = lds->buf + lds->buf_pos + DIRENT_NAME_OFF};
+			char *name      = (char *)lds->buf + lds->buf_pos + DIRENT_NAME_OFF;
 			lds->buf_pos += record_len;
 			if (type == DT_REGULAR_FILE) {
 				b32 valid = 1;
 				for (size i = 0; i < match_prefix.len; i++) {
-					if (match_prefix.s[i] != name.s[i]) {
+					if (match_prefix.s[i] != name[i]) {
 						valid = 0;
 						break;
 					}
 				}
 				if (valid) {
-					result = os_read_whole_file_at((char *)name.s, lds->fd,
-					                               a, arena_flags);
+					result = os_read_whole_file_at(name, lds->fd, a, arena_flags);
 					break;
 				}
 			}

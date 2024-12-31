@@ -52,11 +52,6 @@ typedef struct {
 #endif
 } Arena;
 
-typedef struct {
-	Stream *dir_name;
-	void   *dirfd;
-} PathStream;
-
 #include "yomidict.c"
 
 #define YOMI_TOKS_PER_ENT 10
@@ -92,9 +87,9 @@ static void __attribute__((noreturn)) os_exit(i32);
 static b32 os_write(iptr, s8);
 static b32 os_read_stdin(u8 *, size);
 
-static PathStream os_begin_path_stream(Stream *, Arena *, u32);
-static s8         os_get_valid_file(PathStream *, s8, Arena *, u32);
-static void       os_end_path_stream(PathStream *);
+static iptr os_begin_path_stream(Stream *, Arena *, u32);
+static s8   os_get_valid_file(iptr, s8, Arena *, u32);
+static void os_end_path_stream(iptr);
 
 static Stream error_stream;
 static Stream stdout_stream;
@@ -423,18 +418,18 @@ make_dict(Arena *a, Dict *d)
 	stream_append_s8(&path, prefix);
 	stream_append_s8(&path, os_path_sep);
 	stream_append_s8(&path, d->rom);
-	PathStream ps = os_begin_path_stream(&path, a, ARENA_ALLOC_END);
+	iptr path_stream = os_begin_path_stream(&path, a, ARENA_ALLOC_END);
 
 	u8 *arena_end = a->end;
 	s8 fn_pre = s8("term");
-	for (s8 filedata = os_get_valid_file(&ps, fn_pre, a, ARENA_ALLOC_END);
+	for (s8 filedata = os_get_valid_file(path_stream, fn_pre, a, ARENA_ALLOC_END);
 	     filedata.len;
-	     filedata = os_get_valid_file(&ps, fn_pre, a, ARENA_ALLOC_END))
+	     filedata = os_get_valid_file(path_stream, fn_pre, a, ARENA_ALLOC_END))
 	{
 		parse_term_bank(a, &d->ht, filedata);
 		a->end = arena_end;
 	}
-	os_end_path_stream(&ps);
+	os_end_path_stream(path_stream);
 
 	a->end = starting_arena_end;
 

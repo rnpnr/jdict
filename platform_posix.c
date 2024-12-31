@@ -56,19 +56,19 @@ os_read_stdin(u8 *buf, size count)
 }
 
 static s8
-os_read_whole_file(char *file, Arena *a, u32 arena_flags)
+os_read_whole_file_at(char *file, iptr dir_fd, Arena *a, u32 arena_flags)
 {
 
-	struct stat st;
-	if (stat(file, &st) < 0) {
-		stream_append_s8(&error_stream, s8("failed to stat: "));
+	i32 fd = openat(dir_fd, file, O_RDONLY);
+	if (fd < 0) {
+		stream_append_s8(&error_stream, s8("failed to open: "));
 		stream_append_s8(&error_stream, cstr_to_s8(file));
 		die(&error_stream);
 	}
 
-	i32 fd = open(file, O_RDONLY);
-	if (fd < 0) {
-		stream_append_s8(&error_stream, s8("failed to open: "));
+	struct stat st;
+	if (fstat(fd, &st) < 0) {
+		stream_append_s8(&error_stream, s8("failed to stat: "));
 		stream_append_s8(&error_stream, cstr_to_s8(file));
 		die(&error_stream);
 	}
@@ -97,47 +97,40 @@ os_write(iptr file, s8 raw)
 	return 1;
 }
 
-static PathStream
+static iptr
 os_begin_path_stream(Stream *dir_name, Arena *a, u32 arena_flags)
 {
 	(void)a; (void)arena_flags;
 
 	stream_append_byte(dir_name, 0);
 	DIR *dir = opendir((char *)dir_name->data);
-	dir_name->widx--;
 	if (!dir) {
 		stream_append_s8(&error_stream, s8("opendir: failed to open: "));
-		stream_append_s8(&error_stream, (s8){.len = dir_name->widx, .s = dir_name->data});
+		stream_append_s8(&error_stream, (s8){.len = dir_name->widx - 1, .s = dir_name->data});
 		die(&error_stream);
 	}
-	stream_append_byte(dir_name, '/');
-	return (PathStream){.dir_name = dir_name, .dirfd = dir};
+	return (iptr)dir;
 }
 
 static s8
-os_get_valid_file(PathStream *ps, s8 match_prefix, Arena *a, u32 arena_flags)
+os_get_valid_file(iptr path_stream, s8 match_prefix, Arena *a, u32 arena_flags)
 {
 	s8 result = {0};
-	if (ps->dirfd) {
+	if (path_stream) {
+		DIR *dir    = (DIR *)path_stream;
+		iptr dir_fd = dirfd(dir);
 		struct dirent *dent;
-		while ((dent = readdir(ps->dirfd)) != NULL) {
+		while ((dent = readdir(dir)) != NULL) {
 			if (dent->d_type == DT_REG) {
 				b32 valid = 1;
-				/* NOTE: technically this contains extra NULs but it doesn't matter
-				 * for this purpose. We need NUL terminated to call read() */
-				s8 name = {.len = dent->d_reclen - 2 - offsetof(struct dirent, d_name),
-				           .s   = (u8 *)dent->d_name};
 				for (size i = 0; i < match_prefix.len; i++) {
-					if (match_prefix.s[i] != name.s[i]) {
+					if (match_prefix.s[i] != dent->d_name[i]) {
 						valid = 0;
 						break;
 					}
 				}
 				if (valid) {
-					Stream dir_name = *ps->dir_name;
-					stream_append_s8(&dir_name, name);
-					result = os_read_whole_file((char *)dir_name.data, a,
-					                            arena_flags);
+					result = os_read_whole_file_at(dent->d_name, dir_fd, a, arena_flags);
 					break;
 				}
 			}
@@ -147,10 +140,9 @@ os_get_valid_file(PathStream *ps, s8 match_prefix, Arena *a, u32 arena_flags)
 }
 
 static void
-os_end_path_stream(PathStream *ps)
+os_end_path_stream(iptr path_stream)
 {
-	closedir(ps->dirfd);
-	ps->dirfd = 0;
+	closedir((DIR *)path_stream);
 }
 
 i32
