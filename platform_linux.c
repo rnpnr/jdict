@@ -7,17 +7,28 @@
 
 #define PROT_READ     0x01
 #define PROT_WRITE    0x02
+#define PROT_RW       0x03
 #define MAP_PRIVATE   0x02
-#define MAP_ANONYMOUS 0x20
+#define MAP_ANON      0x20
+
+#define AT_FDCWD      (-100)
 
 #define O_RDONLY      0x00
-#define O_DIRECTORY   0x10000
 
 #define DT_REGULAR_FILE 8
+
+typedef __attribute__((aligned(16))) u8 stat_buffer[144];
+#define STAT_BUF_MEMBER(sb, t, off) (*(t *)((u8 *)(sb) + off))
+#define STAT_FILE_SIZE(sb)  STAT_BUF_MEMBER(sb, u64,  48)
+
+#define DIRENT_RECLEN_OFF 16
+#define DIRENT_TYPE_OFF   18
+#define DIRENT_NAME_OFF   19
 
 static i64 syscall1(i64, i64);
 static i64 syscall2(i64, i64, i64);
 static i64 syscall3(i64, i64, i64, i64);
+static i64 syscall4(i64, i64, i64, i64, i64);
 static i64 syscall6(i64, i64, i64, i64, i64, i64, i64);
 
 typedef struct {
@@ -38,7 +49,7 @@ static void
 os_exit(i32 code)
 {
 	syscall1(SYS_exit, code);
-	__builtin_unreachable();
+	unreachable();
 }
 
 static b32
@@ -60,25 +71,25 @@ os_read_stdin(u8 *buf, size count)
 }
 
 static s8
-os_read_whole_file(char *file, Arena *a, u32 arena_flags)
+os_read_whole_file_at(char *file, iptr dir_fd, Arena *a, u32 arena_flags)
 {
-	__attribute((aligned(16))) u8 stat_buf[STAT_BUF_SIZE];
-	u64 status = syscall2(SYS_stat, (iptr)file, (iptr)stat_buf);
-	if (status > -4096UL) {
-		stream_append_s8(&error_stream, s8("failed to stat: "));
-		stream_append_s8(&error_stream, cstr_to_s8(file));
-		die(&error_stream);
-	}
-
-	u64 fd = syscall3(SYS_open, (iptr)file, O_RDONLY, 0);
+	u64 fd = syscall4(SYS_openat, dir_fd, (iptr)file, O_RDONLY, 0);
 	if (fd > -4096UL) {
 		stream_append_s8(&error_stream, s8("failed to open: "));
 		stream_append_s8(&error_stream, cstr_to_s8(file));
 		die(&error_stream);
 	}
 
-	i64 *file_size = (i64 *)(stat_buf + STAT_SIZE_OFF);
-	s8 result = {.len = *file_size, .s = alloc(a, u8, *file_size, arena_flags|ARENA_NO_CLEAR)};
+	stat_buffer sb;
+	u64 status = syscall2(SYS_fstat, fd, (iptr)sb);
+	if (status > -4096UL) {
+		stream_append_s8(&error_stream, s8("failed to stat: "));
+		stream_append_s8(&error_stream, cstr_to_s8(file));
+		die(&error_stream);
+	}
+
+	u64 file_size = STAT_FILE_SIZE(sb);
+	s8 result = {.len = file_size, .s = alloc(a, u8, file_size, arena_flags|ARENA_NO_CLEAR)};
 	size rlen = syscall3(SYS_read, fd, (iptr)result.s, result.len);
 	syscall1(SYS_close, fd);
 
@@ -92,41 +103,37 @@ os_read_whole_file(char *file, Arena *a, u32 arena_flags)
 }
 
 static Arena
-os_new_arena(size cap)
+os_new_arena(size requested_size)
 {
-	Arena a = {0};
+	Arena result = {0};
 
-	size pagesize = PAGESIZE;
-	if (cap % pagesize != 0)
-		cap += pagesize - cap % pagesize;
+	size alloc_size = requested_size;
+	if (alloc_size % PAGESIZE != 0)
+		alloc_size += PAGESIZE - alloc_size % PAGESIZE;
 
-	u64 p = syscall6(SYS_mmap, 0, cap, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
-	if (p > -4096UL) {
-		return (Arena){0};
-	} else {
-		a.beg = (u8 *)p;
-	}
-	a.end = a.beg + cap;
+	u64 memory = syscall6(SYS_mmap, 0, alloc_size, PROT_RW, MAP_ANON|MAP_PRIVATE, -1, 0);
+	if (memory <= -4096UL) {
+		result.beg = (void *)memory;
+		result.end = result.beg + alloc_size;
 #ifdef _DEBUG_ARENA
-	a.min_capacity_remaining = cap;
+		result.min_capacity_remaining = alloc_size;
 #endif
-	return a;
+	}
+
+	return result;
 }
 
 static PathStream
 os_begin_path_stream(Stream *dir_name, Arena *a, u32 arena_flags)
 {
 	stream_append_byte(dir_name, 0);
-	u64 fd = syscall3(SYS_open, (iptr)dir_name->data, O_DIRECTORY|O_RDONLY, 0);
-	dir_name->widx--;
+	u64 fd = syscall4(SYS_openat, AT_FDCWD, (iptr)dir_name->data, O_DIRECTORY|O_RDONLY, 0);
 
 	if (fd > -4096UL) {
 		stream_append_s8(&error_stream, s8("os_begin_path_stream: failed to open: "));
 		stream_append_s8(&error_stream, (s8){.len = dir_name->widx, .s = dir_name->data});
 		die(&error_stream);
 	}
-
-	stream_append_byte(dir_name, '/');
 
 	LinuxDirectoryStream *lds = alloc(a, LinuxDirectoryStream, 1, arena_flags);
 	lds->fd = fd;
@@ -176,10 +183,8 @@ os_get_valid_file(PathStream *ps, s8 match_prefix, Arena *a, u32 arena_flags)
 					}
 				}
 				if (valid) {
-					Stream dir_name = *ps->dir_name;
-					stream_append_s8(&dir_name, name);
-					result = os_read_whole_file((char *)dir_name.data, a,
-					                            arena_flags);
+					result = os_read_whole_file_at((char *)name.s, lds->fd,
+					                               a, arena_flags);
 					break;
 				}
 			}

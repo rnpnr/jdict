@@ -1,6 +1,23 @@
 /* See LICENSE for license details. */
+#ifndef asm
+#ifdef __asm
+#define asm __asm
+#else
+#define asm __asm__
+#endif
+#endif
+
+#define FORCE_INLINE inline __attribute__((always_inline))
+
+#ifdef __ARM_ARCH_ISA_A64
+/* TODO? debuggers just loop here forever and need a manual PC increment (jump +1 in gdb) */
+#define debugbreak() asm volatile ("brk 0xf000")
+#elif __x86_64__
+#define debugbreak() asm volatile ("int3; nop")
+#endif
+
 #ifdef _DEBUG
-#define ASSERT(c) do { __asm("int3; nop"); } while (0)
+#define ASSERT(c) do { debugbreak(); } while (0)
 #else
 #define ASSERT(c) {}
 #endif
@@ -73,7 +90,6 @@ typedef struct {
 static void __attribute__((noreturn)) os_exit(i32);
 
 static b32 os_write(iptr, s8);
-static s8  os_read_whole_file(char *, Arena *, u32);
 static b32 os_read_stdin(u8 *, size);
 
 static PathStream os_begin_path_stream(Stream *, Arena *, u32);

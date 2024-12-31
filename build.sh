@@ -14,6 +14,10 @@ src=platform_posix.c
 [ ! $debug ] && ldflags="-s $ldflags"
 
 case $(uname -sm) in
+"Linux aarch64")
+	src=platform_linux_aarch64.c
+	cflags="${cflags} -nostdlib -ffreestanding -fno-stack-protector -Wl,--gc-sections"
+	;;
 "Linux x86_64")
 	src=platform_linux_amd64.c
 	cflags="${cflags} -nostdinc -nostdlib -ffreestanding -fno-stack-protector -Wl,--gc-sections"

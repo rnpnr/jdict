@@ -10,31 +10,18 @@ typedef signed   long  size;
 typedef unsigned long  usize;
 typedef signed   long  iptr;
 
-#ifndef asm
-#ifdef __asm
-#define asm __asm
-#else
-#define asm __asm__
-#endif
-#endif
-
 #define SYS_read       0
 #define SYS_write      1
-#define SYS_open       2
 #define SYS_close      3
-#define SYS_stat       4
+#define SYS_fstat      5
 #define SYS_mmap       9
 #define SYS_exit       60
 #define SYS_getdents64 217
+#define SYS_openat     257
 
 #define PAGESIZE 4096
 
-#define STAT_BUF_SIZE 144
-#define STAT_SIZE_OFF 48
-
-#define DIRENT_RECLEN_OFF 16
-#define DIRENT_TYPE_OFF   18
-#define DIRENT_NAME_OFF   19
+#define O_DIRECTORY   0x10000
 
 #include "platform_linux.c"
 
@@ -69,6 +56,19 @@ syscall3(i64 n, i64 a1, i64 a2, i64 a3)
 	asm volatile ("syscall"
 		: "=a"(result)
 		: "a"(n), "D"(a1), "S"(a2), "d"(a3)
+		: "rcx", "r11", "memory"
+	);
+	return result;
+}
+
+static i64
+syscall4(i64 n, i64 a1, i64 a2, i64 a3, i64 a4)
+{
+	i64 result;
+	register i64 r10 asm("r10") = a4;
+	asm volatile ("syscall"
+		: "=a"(result)
+		: "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10)
 		: "rcx", "r11", "memory"
 	);
 	return result;
