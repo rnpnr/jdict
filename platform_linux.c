@@ -21,9 +21,10 @@ typedef __attribute__((aligned(16))) u8 stat_buffer[144];
 #define STAT_BUF_MEMBER(sb, t, off) (*(t *)((u8 *)(sb) + off))
 #define STAT_FILE_SIZE(sb)  STAT_BUF_MEMBER(sb, u64,  48)
 
-#define DIRENT_RECLEN_OFF 16
-#define DIRENT_TYPE_OFF   18
-#define DIRENT_NAME_OFF   19
+#define DIRENT_BUF_MEMBER(db, t, off) (*(t *)((u8 *)(db) + off))
+#define DIRENT_RECLEN(db) DIRENT_BUF_MEMBER(db, u16,    16)
+#define DIRENT_TYPE(db)   DIRENT_BUF_MEMBER(db, u8,     18)
+#define DIRENT_NAME(db)   DIRENT_BUF_MEMBER(db, char *, 19)
 
 static i64 syscall1(i64, i64);
 static i64 syscall2(i64, i64, i64);
@@ -166,9 +167,9 @@ os_get_valid_file(iptr path_stream, s8 match_prefix, Arena *a, u32 arena_flags)
 				lds->buf_end = ret;
 				lds->buf_pos = 0;
 			}
-			u16  record_len = *(u16 *)(lds->buf + lds->buf_pos + DIRENT_RECLEN_OFF);
-			u8   type       = lds->buf[lds->buf_pos + DIRENT_TYPE_OFF];
-			char *name      = (char *)lds->buf + lds->buf_pos + DIRENT_NAME_OFF;
+			u16  record_len = DIRENT_RECLEN(lds->buf + lds->buf_pos);
+			u8   type       = DIRENT_TYPE(lds->buf + lds->buf_pos);
+			char *name      = DIRENT_NAME(lds->buf + lds->buf_pos);
 			lds->buf_pos += record_len;
 			if (type == DT_REGULAR_FILE) {
 				b32 valid = 1;
