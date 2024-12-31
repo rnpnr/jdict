@@ -1,17 +1,28 @@
 #!/bin/sh
-cflags="-march=native -O3 -std=c99 -Wall -Wextra -fno-builtin"
+cflags="-march=native -std=c99 -Wall -Wextra -fno-builtin -static"
 #cflags="${cflags} -fproc-stat-report"
 #cflags="${cflags} -Rpass-missed=.*"
 #cflags="${cflags} -fsanitize=address,undefined"
-ldflags="-static"
 
 cc=${CC:-cc}
-debug=${DEBUG}
+build=release
+
+for arg in "$@"; do
+	case "$arg" in
+	clang)   cc=clang      ;;
+	gcc)     cc=gcc        ;;
+	debug)   build=debug   ;;
+	release) build=release ;;
+	*) echo "usage: $0 [debug|release] [gcc|clang]" ;;
+	esac
+done
+
+case "${build}" in
+debug)   cflags="${cflags} -O0 -ggdb -D_DEBUG" ;;
+release) cflags="${cflags} -O3 -s" ;;
+esac
 
 src=platform_posix.c
-
-[ $debug ] && cflags="$cflags -O0 -ggdb -D_DEBUG"
-[ ! $debug ] && ldflags="-s $ldflags"
 
 case $(uname -sm) in
 "Linux aarch64")
@@ -24,4 +35,10 @@ case $(uname -sm) in
 	;;
 esac
 
-${cc} $cflags $ldflags $src -o jdict
+${cc} ${cflags} ${ldflags} $src -o jdict
+
+# NOTE(rnp): cross compile tests
+clang --target=x86_64-unknown-linux-musl  -O3 -nostdlib -ffreestanding -fno-stack-protector \
+	-Wl,--gc-sections platform_linux_amd64.c -o /dev/null
+clang --target=aarch64-unknown-linux-musl -O3 -nostdlib -ffreestanding -fno-stack-protector \
+	-Wl,--gc-sections platform_linux_aarch64.c -o /dev/null
