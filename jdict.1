@@ -1,9 +1,10 @@
-.Dd November 16, 2023
+.Dd January 5, 2025
 .Dt JDICT 1
+.Os
 .
 .Sh NAME
 .Nm jdict
-.Nd search through japanese dictionaries
+.Nd search through Japanese dictionaries
 .
 .Sh SYNOPSIS
 .Nm
@@ -18,7 +19,7 @@ The
 utility searches through dictionaries formatted in the yomidict
 format for
 .Ar term ...
-and outputs any found definitions to stdout.
+and outputs the definition for any matches to stdout.
 .Pp
 The following options are supported:
 .
@@ -31,7 +32,8 @@ use
 .Ar FS
 for output field separation.
 .It Fl i
-run the program in interactive mode. FS will be set to "\\n".
+run the program in interactive mode.
+FS will be set to "\\n".
 .El
 .
 .Sh CUSTOMIZATION
@@ -43,9 +45,11 @@ is customized by modifying config.h and (re)compiling the program.
 .
 .Sh CAVEATS
 Many of the newer dictionaries available online contain full json
-data. This throws away the benefits of the original yomidict
-format and requires a full json parser to handle. This is outside
-the scope of this utility and will not be implemented. To check if
-the dictionary is supported open a term_bank_XX.json file and check
-for field names. If they are present the dictionary is not
-supported.
+data.
+This throws away the benefits of the original yomidict format and
+requires a full json parser to handle.
+The handling of these dictionaries is outside the scope of this
+utility and will not be implemented.
+To check if a dictionary is supported open a term_bank_XX.json
+file and check for field names.
+If they are present the dictionary is not supported.
