@@ -56,7 +56,7 @@ alloctok(YomiScanner *s, YomiTok *toks, ul ntoks)
 	YomiTok *t;
 
 	if (ntoks <= s->toknext)
-		return NULL;
+		return 0;
 
 	t = &toks[s->toknext++];
 	t->parent = -1;
@@ -130,7 +130,7 @@ yomi_scan(YomiScanner *s, YomiTok *toks, ul ntoks)
 	YomiTok *tok;
 	int r, count = s->toknext;
 
-	if (toks == NULL)
+	if (!toks)
 		return -1;
 
 	for (; s->pos < s->len; s->pos++) {
@@ -183,7 +183,7 @@ yomi_scan(YomiScanner *s, YomiTok *toks, ul ntoks)
 
 		case '\"':
 			tok = alloctok(s, toks, ntoks);
-			if (tok == NULL)
+			if (!tok)
 				return YOMI_ERROR_NOMEM;
 
 			r = string(s, tok);
@@ -204,7 +204,7 @@ yomi_scan(YomiScanner *s, YomiTok *toks, ul ntoks)
 
 		default:
 			tok = alloctok(s, toks, ntoks);
-			if (tok == NULL)
+			if (!tok)
 				return YOMI_ERROR_NOMEM;
 
 			r = number(s, tok);

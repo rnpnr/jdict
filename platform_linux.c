@@ -1,8 +1,6 @@
 /* See LICENSE for license details. */
 #define os_path_sep s8("/")
 
-#define NULL ((void *)0)
-
 #include "jdict.c"
 
 #define PROT_READ     0x01

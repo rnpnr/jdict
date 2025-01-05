@@ -353,28 +353,20 @@ parse_term_bank(Arena *a, struct ht *ht, s8 data)
 		if (base_tok->type != YOMI_ENTRY)
 			continue;
 
-		YomiTok *tstr = NULL, *tdefs = NULL;
+		YomiTok *tstr = 0, *tdefs = 0;
 		for (usize j = 1; j < base_tok->len; j++) {
-
 			switch (base_tok[j].type) {
-			case YOMI_STR:
-				if (tstr == NULL)
-					tstr = base_tok + j;
-				break;
-			case YOMI_ARRAY:
-				if (tdefs == NULL)
-					tdefs = base_tok + j;
-			default: /* FALLTHROUGH */
-				break;
+			case YOMI_STR:   if (!tstr)  tstr  = base_tok + j; break;
+			case YOMI_ARRAY: if (!tdefs) tdefs = base_tok + j; break;
+			default: break;
 			}
 		}
 
 		/* check if entry was valid */
-		if (tdefs == NULL || tstr == NULL) {
-			stream_append_s8(&error_stream, s8("parse_term_bank: invalid entry: got "));
-			if (!tdefs) stream_append_s8(&error_stream, s8("tdefs"));
-			else        stream_append_s8(&error_stream, s8("tstr"));
-			stream_append_s8(&error_stream, s8(" == NULL\n"));
+		if (!tdefs || !tstr) {
+			stream_append_s8(&error_stream, s8("parse_term_bank: invalid entry: missing "));
+			if (!tdefs) stream_append_s8(&error_stream, s8("definition token\n"));
+			else        stream_append_s8(&error_stream, s8("name token\n"));
 			break;
 		}
 
@@ -547,7 +539,7 @@ repl(Arena *a, Dict *dicts, u32 ndicts)
 static i32
 jdict(Arena *a, i32 argc, char *argv[])
 {
-	Dict *dicts = NULL;
+	Dict *dicts = 0;
 	i32 ndicts = 0, nterms = 0;
 	i32 iflag = 0;
 
@@ -577,7 +569,7 @@ jdict(Arena *a, i32 argc, char *argv[])
 					break;
 				}
 			}
-			if (dicts == NULL) {
+			if (!dicts) {
 				stream_append_s8(&error_stream, s8("invalid dictionary name: "));
 				stream_append_s8(&error_stream, dname);
 				die(&error_stream);
