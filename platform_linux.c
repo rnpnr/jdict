@@ -200,7 +200,7 @@ linux_main(i32 argc, char *argv[], char *envp[])
 
 	stdout_stream.fd   = 1;
 	stdout_stream.cap  = 8 * MEGABYTE;
-	stdout_stream.data = alloc(&memory, u8, error_stream.cap, ARENA_NO_CLEAR);
+	stdout_stream.data = alloc(&memory, u8, stdout_stream.cap, ARENA_NO_CLEAR);
 
 	i32 result = jdict(&memory, argc, argv);
 

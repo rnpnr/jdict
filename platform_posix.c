@@ -156,7 +156,7 @@ main(i32 argc, char *argv[])
 
 	stdout_stream.fd   = STDOUT_FILENO;
 	stdout_stream.cap  = 8 * MEGABYTE;
-	stdout_stream.data = alloc(&memory, u8, error_stream.cap, ARENA_NO_CLEAR);
+	stdout_stream.data = alloc(&memory, u8, stdout_stream.cap, ARENA_NO_CLEAR);
 
 	return jdict(&memory, argc, argv);
 }
